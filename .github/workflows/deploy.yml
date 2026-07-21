@@ -1,0 +1,17 @@
+name: Deploy to Render
+
+on:
+  push:
+    branches: ["main"]
+
+# Only run after the CI job succeeds
+jobs:
+  deploy:
+    name: Trigger Render Deploy
+    runs-on: ubuntu-latest
+    needs: []   # No local dependency — Render hook is the gate
+
+    steps:
+      - name: Trigger deploy hook
+        run: |
+          curl --fail-with-body -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
