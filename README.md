@@ -1,20 +1,50 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# PECS — P2P Ephemeral Continuity Suite
 
-# Run and deploy your AI Studio app
+Browser-to-browser file transfer and chat over WebRTC. No accounts, no cloud storage, no data retention.
 
-This contains everything you need to run your app locally.
+## How it works
 
-View your app in AI Studio: https://ai.studio/apps/1288240d-77ce-486a-9824-950c970327e2
+- Devices share a room code to establish a direct WebRTC connection via a lightweight signaling server
+- All payloads are AES-GCM encrypted end-to-end; the server never sees plaintext
+- Files are streamed in chunks and written to OPFS or memory, then auto-downloaded on the receiving end
+- Chat messages travel over the same encrypted data channel
 
-## Run Locally
+## Stack
 
-**Prerequisites:**  Node.js
+- **Frontend** — React, TypeScript, Vite, Tailwind CSS
+- **Signaling server** — Node.js, Express, Socket.io
+- **P2P transport** — WebRTC (`RTCPeerConnection` + `RTCDataChannel`)
+- **Storage** — OPFS (Origin Private File System) with IndexedDB metadata
 
+## Run locally
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```bash
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000` on two devices on the same network. Enter the same room code on both and connect.
+
+> The LAN IP (`http://192.168.x.x:3000`) does not support `crypto.subtle` (non-secure context). The app falls back to an XOR cipher for signaling in that case; use `localhost` or HTTPS for production.
+
+## Project structure
+
+```
+src/
+  App.tsx                  # Main app, signaling logic, state
+  components/
+    ChatPanel.tsx          # Chat UI
+    DragDropZone.tsx       # File drop target
+  lib/
+    crypto.ts              # Key derivation, encrypt/decrypt
+    dataChannel.ts         # Chunked file sending
+    ephemerality.ts        # Heartbeat, session wipe
+    storage.ts             # OPFS write, auto-download
+server.ts                  # Signaling server (Socket.io)
+```
+
+## Notes
+
+- Room codes starting with `dev-` bypass AES-GCM and use the XOR fallback (for LAN testing without HTTPS)
+- No data is stored on the server; the signaling server only relays encrypted blobs
+- Files are auto-downloaded on the receiving device when the transfer completes
