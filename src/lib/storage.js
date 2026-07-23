@@ -1,9 +1,9 @@
-let fileHandle: FileSystemFileHandle | null = null;
-let writableStream: FileSystemWritableFileStream | null = null;
-let inMemoryBuffer: Uint8Array[] = [];
+let fileHandle = null;
+let writableStream = null;
+let inMemoryBuffer = [];
 let currentFileName = '';
 
-export async function initializeOPFS(fileName: string) {
+export async function initializeOPFS(fileName) {
   currentFileName = fileName;
   inMemoryBuffer = [];
 
@@ -22,7 +22,7 @@ export async function initializeOPFS(fileName: string) {
   writableStream = null;
 }
 
-export async function writeChunkToDisk(chunk: ArrayBuffer | Uint8Array) {
+export async function writeChunkToDisk(chunk) {
   if (writableStream) {
     await writableStream.write(chunk);
   } else {
@@ -58,7 +58,7 @@ export async function autoDownloadFile() {
   // Memory path: already downloaded in finalizeFile, nothing to do
 }
 
-function triggerDownload(blob: Blob, name: string) {
+function triggerDownload(blob, name) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -69,7 +69,7 @@ function triggerDownload(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-export function initializeIndexedDB(): Promise<IDBDatabase> {
+export function initializeIndexedDB() {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
       return reject(new Error("IndexedDB unavailable"));
@@ -77,18 +77,18 @@ export function initializeIndexedDB(): Promise<IDBDatabase> {
     const request = indexedDB.open("ContinuityDB", 1);
     
     request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
+      const db = event.target.result;
       if (!db.objectStoreNames.contains("fileMetadata")) {
         db.createObjectStore("fileMetadata", { keyPath: "fileId" });
       }
     };
     
-    request.onsuccess = (event) => resolve((event.target as IDBOpenDBRequest).result);
-    request.onerror = (event) => reject((event.target as IDBOpenDBRequest).error);
+    request.onsuccess = (event) => resolve(event.target.result);
+    request.onerror = (event) => reject(event.target.error);
   });
 }
 
-export function saveMetadata(db: IDBDatabase | null, metadataObj: any): Promise<boolean> {
+export function saveMetadata(db, metadataObj) {
   return new Promise((resolve) => {
     if (!db) return resolve(false);
     try {

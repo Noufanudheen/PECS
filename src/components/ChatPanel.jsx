@@ -1,29 +1,16 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MessageCircle, Send } from 'lucide-react';
 
-export interface ChatMessage {
-  id: string;
-  text: string;
-  sender: 'me' | 'peer';
-  timestamp: number;
-}
-
-interface ChatPanelProps {
-  messages: ChatMessage[];
-  onSend: (text: string) => void;
-  disabled?: boolean;
-}
-
-export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps) {
-  const [input, setInput] = React.useState('');
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+export default function ChatPanel({ messages, onSend, disabled }) {
+  const [input, setInput] = useState('');
+  const bottomRef = useRef(null);
+  const inputRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
     const trimmed = input.trim();
     if (!trimmed || disabled) return;
@@ -32,7 +19,7 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
     inputRef.current?.focus();
   };
 
-  const formatTime = (ts: number) => {
+  const formatTime = (ts) => {
     const d = new Date(ts);
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };

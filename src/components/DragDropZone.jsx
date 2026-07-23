@@ -1,26 +1,21 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, File as FileIcon } from 'lucide-react';
+import { UploadCloud } from 'lucide-react';
 
-interface DragDropZoneProps {
-  onFileSelect: (file: File) => void;
-  disabled?: boolean;
-}
-
-export default function DragDropZone({ onFileSelect, disabled = false }: DragDropZoneProps) {
+export default function DragDropZone({ onFileSelect, disabled = false }) {
   const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef(null);
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = (e) => {
     e.preventDefault();
     if (!disabled) setIsDragging(true);
   };
 
-  const handleDragLeave = (e: React.DragEvent) => {
+  const handleDragLeave = (e) => {
     e.preventDefault();
     setIsDragging(false);
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = (e) => {
     e.preventDefault();
     setIsDragging(false);
     
@@ -38,7 +33,7 @@ export default function DragDropZone({ onFileSelect, disabled = false }: DragDro
     }
   };
 
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileInput = (e) => {
     if (e.target.files && e.target.files.length > 0) {
       onFileSelect(e.target.files[0]);
     }

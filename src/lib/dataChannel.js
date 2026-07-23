@@ -1,16 +1,16 @@
 export const CHUNK_SIZE = 16 * 1024;
 
-export function sendFileChunks(file: File, channel: RTCDataChannel, onProgress?: (progress: number) => void) {
+export function sendFileChunks(file, channel, onProgress) {
   let offset = 0;
 
-  const readSlice = (currentOffset: number) => {
+  const readSlice = (currentOffset) => {
     const slice = file.slice(currentOffset, currentOffset + CHUNK_SIZE);
     const reader = new FileReader();
 
     reader.onload = (e) => {
       if (!e.target || !e.target.result) return;
       
-      channel.send(e.target.result as ArrayBuffer);
+      channel.send(e.target.result);
       offset += slice.size;
       
       if (onProgress) {

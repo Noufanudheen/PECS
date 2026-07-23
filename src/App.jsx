@@ -1,31 +1,31 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { io } from 'socket.io-client';
 import { deriveKey, encryptPayload, decryptPayload } from './lib/crypto';
 import { Shield, Key, Zap, Link2, HardDrive, Lock } from 'lucide-react';
 import DragDropZone from './components/DragDropZone';
-import ChatPanel, { ChatMessage } from './components/ChatPanel';
+import ChatPanel from './components/ChatPanel';
 import { sendFileChunks } from './lib/dataChannel';
 import { initializeOPFS, writeChunkToDisk, finalizeFile, autoDownloadFile, initializeIndexedDB, saveMetadata } from './lib/storage';
 import { startHeartbeat, handleHeartbeatMessage, stopHeartbeat, wipeLocalCache } from './lib/ephemerality';
 
 export default function App() {
   const [roomCode, setRoomCode] = useState('');
-  const [currentRoom, setCurrentRoom] = useState<string | null>(null);
-  const [status, setStatus] = useState<'disconnected' | 'connecting' | 'waiting' | 'connected'>('disconnected');
+  const [currentRoom, setCurrentRoom] = useState(null);
+  const [status, setStatus] = useState('disconnected');
   
-  const [transferProgress, setTransferProgress] = useState<number>(0);
+  const [transferProgress, setTransferProgress] = useState(0);
   const [isTransferring, setIsTransferring] = useState(false);
-  const [receivedFile, setReceivedFile] = useState<{ name: string; id: string } | null>(null);
+  const [receivedFile, setReceivedFile] = useState(null);
 
   // Chat state
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState([]);
 
-  const cryptoKeyRef = useRef<any>(null);
-  const socketRef = useRef<Socket | null>(null);
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const dataChannelRef = useRef<RTCDataChannel | null>(null);
-  const dbRef = useRef<IDBDatabase | null>(null);
-  const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const cryptoKeyRef = useRef(null);
+  const socketRef = useRef(null);
+  const peerConnectionRef = useRef(null);
+  const dataChannelRef = useRef(null);
+  const dbRef = useRef(null);
+  const pendingCandidatesRef = useRef([]);
 
   const configuration = {
     iceServers: [
@@ -36,7 +36,7 @@ export default function App() {
 
   useEffect(() => {
     // Listen for UI reset from ephemerality wipe
-    const handleMessage = (e: MessageEvent) => {
+    const handleMessage = (e) => {
       if (e.data?.type === 'UI_STATE_RESET') {
         setStatus('disconnected');
         setCurrentRoom(null);
@@ -68,11 +68,11 @@ export default function App() {
     wipeLocalCache();
   }, []);
 
-  const addMessage = useCallback((msg: ChatMessage) => {
+  const addMessage = useCallback((msg) => {
     setMessages(prev => [...prev, msg]);
   }, []);
 
-  const setupDataChannel = useCallback((channel: RTCDataChannel) => {
+  const setupDataChannel = useCallback((channel) => {
     dataChannelRef.current = channel;
     channel.binaryType = "arraybuffer";
     channel.bufferedAmountLowThreshold = 65536;
@@ -123,7 +123,43 @@ export default function App() {
     };
   }, [handleDisconnection, addMessage]);
 
-  const handleJoin = async (e?: React.FormEvent, overrideRoomCode?: string) => {
+  const setupWebRTC = async (socket, room) => {
+    console.log("⚙️ [WebRTC] Initializing RTCPeerConnection...");
+    const pc = new RTCPeerConnection(configuration);
+    peerConnectionRef.current = pc;
+
+    pc.ondatachannel = (event) => {
+      if (pc !== peerConnectionRef.current) return;
+      console.log("📥 [WebRTC] Received remote data channel!");
+      setupDataChannel(event.channel);
+    };
+
+    pc.onicecandidate = async (event) => {
+      if (pc !== peerConnectionRef.current) return;
+      if (event.candidate && cryptoKeyRef.current) {
+        console.log("gb [Socket.io] Emitting ICE candidate to peer...");
+        const encryptedCandidate = await encryptPayload(cryptoKeyRef.current, {
+          roomId: room,
+          type: 'ice-candidate',
+          candidate: event.candidate
+        });
+        socket.emit('signal', encryptedCandidate);
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (pc !== peerConnectionRef.current) return;
+      console.log(`⚙️ [WebRTC] Connection state changed to: ${pc.connectionState}`);
+      if (pc.connectionState === 'connected') {
+        setStatus('connected');
+      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        handleDisconnection();
+      }
+    };
+    setStatus('waiting');
+  };
+
+  const handleJoin = async (e, overrideRoomCode) => {
     if (e) e.preventDefault();
     const activeRoom = overrideRoomCode || roomCode;
     if (!activeRoom.trim()) return;
@@ -262,11 +298,10 @@ export default function App() {
   };
 
   // ==========================================
-  // TEST AUTOMATION CODE - REMOVE LATER
+  // TEST AUTOMATION CODE
   // ==========================================
   useEffect(() => {
     let active = true;
-    // Random jitter so two tabs don't join simultaneously (race condition)
     const delay = 500 + Math.random() * 1000;
     const timer = setTimeout(async () => {
       if (!active) return;
@@ -284,43 +319,7 @@ export default function App() {
   // END TEST AUTOMATION CODE
   // ==========================================
 
-  const setupWebRTC = async (socket: Socket, room: string) => {
-    console.log("⚙️ [WebRTC] Initializing RTCPeerConnection...");
-    const pc = new RTCPeerConnection(configuration);
-    peerConnectionRef.current = pc;
-
-    pc.ondatachannel = (event) => {
-      if (pc !== peerConnectionRef.current) return;
-      console.log("📥 [WebRTC] Received remote data channel!");
-      setupDataChannel(event.channel);
-    };
-
-    pc.onicecandidate = async (event) => {
-      if (pc !== peerConnectionRef.current) return;
-      if (event.candidate && cryptoKeyRef.current) {
-        console.log("📤 [Socket.io] Emitting ICE candidate to peer...");
-        const encryptedCandidate = await encryptPayload(cryptoKeyRef.current, {
-          roomId: room,
-          type: 'ice-candidate',
-          candidate: event.candidate
-        });
-        socket.emit('signal', encryptedCandidate);
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      if (pc !== peerConnectionRef.current) return;
-      console.log(`⚙️ [WebRTC] Connection state changed to: ${pc.connectionState}`);
-      if (pc.connectionState === 'connected') {
-        setStatus('connected');
-      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-        handleDisconnection();
-      }
-    };
-    setStatus('waiting');
-  };
-
-  const handleFileSelect = (file: File) => {
+  const handleFileSelect = (file) => {
     if (!dataChannelRef.current || dataChannelRef.current.readyState !== 'open') return;
     
     setIsTransferring(true);
@@ -346,10 +345,10 @@ export default function App() {
     });
   };
 
-  const handleSendChat = useCallback((text: string) => {
+  const handleSendChat = useCallback((text) => {
     if (!dataChannelRef.current || dataChannelRef.current.readyState !== 'open') return;
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
-    const msg: ChatMessage = { id, text, sender: 'me', timestamp: Date.now() };
+    const msg = { id, text, sender: 'me', timestamp: Date.now() };
     addMessage(msg);
     dataChannelRef.current.send(JSON.stringify({
       type: 'CHAT_MESSAGE',

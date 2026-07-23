@@ -1,6 +1,6 @@
 const isSubtleSupported = typeof window !== 'undefined' && !!(window.crypto && window.crypto.subtle);
 
-export async function deriveKey(roomCode: string): Promise<CryptoKey | { roomCode: string; isFallback: boolean }> {
+export async function deriveKey(roomCode) {
   const forceFallback = roomCode.startsWith('dev-') || roomCode.includes('fallback');
   if (isSubtleSupported && !forceFallback) {
     const encoder = new TextEncoder();
@@ -26,11 +26,11 @@ export async function deriveKey(roomCode: string): Promise<CryptoKey | { roomCod
     );
   }
 
-  // Fallback for non-secure HTTP contexts (e.g., testing via LAN IP http://172.20.10.3:3000)
+  // Fallback for non-secure HTTP contexts (e.g., testing via LAN IP)
   return { roomCode, isFallback: true };
 }
 
-function fallbackCipher(text: string, key: string): string {
+function fallbackCipher(text, key) {
   let result = '';
   for (let i = 0; i < text.length; i++) {
     result += String.fromCharCode(text.charCodeAt(i) ^ key.charCodeAt(i % key.length));
@@ -38,7 +38,7 @@ function fallbackCipher(text: string, key: string): string {
   return btoa(result);
 }
 
-function fallbackDecipher(b64: string, key: string): string {
+function fallbackDecipher(b64, key) {
   const text = atob(b64);
   let result = '';
   for (let i = 0; i < text.length; i++) {
@@ -47,8 +47,8 @@ function fallbackDecipher(b64: string, key: string): string {
   return result;
 }
 
-export async function encryptPayload(cryptoKey: any, payload: any) {
-  if (isSubtleSupported && cryptoKey && !(cryptoKey as any).isFallback) {
+export async function encryptPayload(cryptoKey, payload) {
+  if (isSubtleSupported && cryptoKey && !cryptoKey.isFallback) {
     const encoder = new TextEncoder();
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
     
@@ -57,7 +57,7 @@ export async function encryptPayload(cryptoKey: any, payload: any) {
         name: "AES-GCM",
         iv: iv
       },
-      cryptoKey as CryptoKey,
+      cryptoKey,
       encoder.encode(JSON.stringify(payload))
     );
 
@@ -80,8 +80,8 @@ export async function encryptPayload(cryptoKey: any, payload: any) {
   };
 }
 
-export async function decryptPayload(cryptoKey: any, encryptedData: any) {
-  if (isSubtleSupported && cryptoKey && !(cryptoKey as any).isFallback && !encryptedData.isFallback) {
+export async function decryptPayload(cryptoKey, encryptedData) {
+  if (isSubtleSupported && cryptoKey && !cryptoKey.isFallback && !encryptedData.isFallback) {
     const iv = new Uint8Array(encryptedData.iv);
     const ciphertext = new Uint8Array(encryptedData.ciphertext);
 
@@ -90,7 +90,7 @@ export async function decryptPayload(cryptoKey: any, encryptedData: any) {
         name: "AES-GCM",
         iv: iv
       },
-      cryptoKey as CryptoKey,
+      cryptoKey,
       ciphertext
     );
 
