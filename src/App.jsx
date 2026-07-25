@@ -99,15 +99,26 @@ export default function App() {
   }, []);
 
   const handleAddClipboardItem = useCallback((item) => {
+    let payloadItem = item;
+
     setClipboardItems(prev => {
-      if (prev.some(i => i.id === item.id)) return prev;
+      // Check if content already exists in session memory
+      const existingIdx = prev.findIndex(i => i.content === item.content || i.id === item.id);
+      if (existingIdx !== -1) {
+        payloadItem = {
+          ...prev[existingIdx],
+          timestamp: Date.now()
+        };
+        const filtered = prev.filter((_, idx) => idx !== existingIdx);
+        return [payloadItem, ...filtered].slice(0, 20);
+      }
       return [item, ...prev].slice(0, 20);
     });
 
     if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
       dataChannelRef.current.send(JSON.stringify({
         type: 'CLIPBOARD_ITEM',
-        item
+        item: payloadItem
       }));
     }
   }, []);
@@ -143,7 +154,16 @@ export default function App() {
           });
         } else if (parsed.type === 'CLIPBOARD_ITEM') {
           setClipboardItems(prev => {
-            if (prev.some(i => i.id === parsed.item.id)) return prev;
+            const existingIdx = prev.findIndex(i => i.content === parsed.item.content || i.id === parsed.item.id);
+            if (existingIdx !== -1) {
+              const updatedItem = {
+                ...prev[existingIdx],
+                ...parsed.item,
+                timestamp: parsed.item.timestamp || Date.now()
+              };
+              const filtered = prev.filter((_, idx) => idx !== existingIdx);
+              return [updatedItem, ...filtered].slice(0, 20);
+            }
             return [parsed.item, ...prev].slice(0, 20);
           });
         } else if (parsed.type === 'FILE_METADATA') {
