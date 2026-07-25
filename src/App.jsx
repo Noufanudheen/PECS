@@ -447,8 +447,8 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0a0a0b] text-zinc-200 font-sans selection:bg-indigo-500/30">
       <div className="max-w-[1600px] mx-auto p-4 md:p-8">
-        {/* Header */}
-        <header className="flex items-center justify-between mb-10">
+        {/* Header with Integrated Secure Pairing */}
+        <header className="bg-zinc-900/40 border border-zinc-800/60 rounded-2xl p-4 md:p-6 mb-8 backdrop-blur-md shadow-xl flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
               <Zap className="w-5 h-5 text-indigo-400" />
@@ -459,16 +459,57 @@ export default function App() {
             </div>
           </div>
 
-          {/* Global status & PiP control badge */}
-          <div className="flex items-center space-x-3">
-            {status !== 'disconnected' && (
-              <div className={`px-3 py-1 rounded-full text-xs font-medium border flex items-center space-x-2 ${statusBadge}`}>
-                <div className={`w-1.5 h-1.5 rounded-full ${statusDot}`} />
-                <span>{statusLabel}</span>
-                {currentRoom && <span className="font-mono opacity-60">· {currentRoom}</span>}
-              </div>
+          {/* Integrated Pairing Controls */}
+          <div className="flex flex-wrap items-center gap-3">
+            {status === 'disconnected' ? (
+              <form onSubmit={handleJoin} className="flex items-center space-x-2 w-full sm:w-auto">
+                <div className="relative flex-1 sm:w-64">
+                  <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                  <input
+                    id="roomCode"
+                    type="text"
+                    value={roomCode}
+                    onChange={(e) => setRoomCode(e.target.value)}
+                    placeholder="Enter Room Code..."
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-2 pl-9 pr-3 text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 font-mono text-xs transition-all"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-2 px-4 text-xs font-medium transition-all shadow-md shadow-indigo-500/10 whitespace-nowrap"
+                >
+                  Connect
+                </button>
+              </form>
+            ) : (
+              <>
+                {/* Status Badge */}
+                <div className={`px-3 py-1.5 rounded-xl text-xs font-medium border flex items-center space-x-2 ${statusBadge}`}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${statusDot}`} />
+                  <span>{statusLabel}</span>
+                  {currentRoom && <span className="font-mono opacity-70">({currentRoom})</span>}
+                </div>
+
+                {/* Disconnect Button */}
+                <button
+                  onClick={() => {
+                    handleDisconnection();
+                    setStatus('disconnected');
+                    setCurrentRoom(null);
+                    setMessages([]);
+                    setReceivedFile(null);
+                    setIsTransferring(false);
+                    setClipboardItems([]);
+                  }}
+                  className="bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-xl py-1.5 px-3 text-xs font-medium border border-zinc-700 transition-colors"
+                >
+                  Disconnect
+                </button>
+              </>
             )}
 
+            {/* Background Mode PiP Button */}
             <button
               onClick={handleTogglePiP}
               title="Pop out Picture-in-Picture window to keep P2P transfer active in background when tab is hidden"
@@ -484,71 +525,10 @@ export default function App() {
           </div>
         </header>
 
-        {/* 4-column layout */}
-        <main className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-start">
+        {/* 3-column layout */}
+        <main className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
 
-          {/* ── COLUMN 1: Secure Pairing ── */}
-          <section>
-            <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-2xl p-6 backdrop-blur-sm">
-              <h2 className="text-lg font-medium text-white mb-2 flex items-center">
-                <Link2 className="w-4 h-4 mr-2 text-zinc-400" />
-                Secure Pairing
-              </h2>
-              <p className="text-sm text-zinc-400 mb-6 leading-relaxed">
-                Enter a shared room code to establish an end-to-end encrypted WebRTC tunnel. Data never persists on our servers.
-              </p>
-
-              {status === 'disconnected' ? (
-                <form onSubmit={handleJoin} className="space-y-4">
-                  <div>
-                    <label htmlFor="roomCode" className="block text-xs font-mono text-zinc-500 mb-2 uppercase tracking-wider">
-                      Room Code
-                    </label>
-                    <div className="relative">
-                      <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-                      <input
-                        id="roomCode"
-                        type="text"
-                        value={roomCode}
-                        onChange={(e) => setRoomCode(e.target.value)}
-                        placeholder="e.g. gamma-ray-burst"
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-3 pl-10 pr-4 text-white placeholder:text-zinc-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all font-mono text-sm"
-                        required
-                      />
-                    </div>
-                  </div>
-                  <button
-                    type="submit"
-                    className="w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-3 px-4 font-medium transition-colors shadow-lg shadow-indigo-500/10"
-                  >
-                    Initialize Connection
-                  </button>
-                </form>
-              ) : (
-                <div className="space-y-4">
-                  <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
-                    <p className="text-xs font-mono text-zinc-500 mb-1">CURRENT ROOM</p>
-                    <p className="text-white font-mono text-sm">{currentRoom}</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      handleDisconnection();
-                      setStatus('disconnected');
-                      setCurrentRoom(null);
-                      setMessages([]);
-                      setReceivedFile(null);
-                      setIsTransferring(false);
-                    }}
-                    className="w-full bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl py-3 px-4 font-medium transition-colors border border-zinc-700"
-                  >
-                    Disconnect &amp; Wipe
-                  </button>
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* ── COLUMN 2: Chat ── */}
+          {/* ── COLUMN 1: Chat ── */}
           <section>
             <div
               className="bg-zinc-900/50 border border-zinc-800/50 rounded-2xl p-6 backdrop-blur-sm flex flex-col"
@@ -562,7 +542,7 @@ export default function App() {
             </div>
           </section>
 
-          {/* ── COLUMN 3: Shared Session Clipboard ── */}
+          {/* ── COLUMN 2: Shared Session Clipboard ── */}
           <section>
             <ClipboardPanel
               items={clipboardItems}
@@ -572,7 +552,7 @@ export default function App() {
             />
           </section>
 
-          {/* ── COLUMN 4: Data Pipeline ── */}
+          {/* ── COLUMN 3: Data Pipeline ── */}
           <section>
             <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-2xl p-6 backdrop-blur-sm flex flex-col" style={{ minHeight: 520 }}>
               <h2 className="text-lg font-medium text-white mb-2 flex items-center">

@@ -139,6 +139,37 @@ export default function ClipboardPanel({ items = [], onPasteItem, onClear, disab
     }
   };
 
+  // Helper to copy image to clipboard
+  const handleCopyImage = async (id, dataUrl) => {
+    try {
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      let pngBlob = blob;
+
+      if (blob.type !== 'image/png') {
+        const img = new Image();
+        img.src = dataUrl;
+        await new Promise(resolve => (img.onload = resolve));
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        pngBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      }
+
+      if (navigator.clipboard && window.ClipboardItem) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'image/png': pngBlob })
+        ]);
+        setCopiedId(id);
+        setTimeout(() => setCopiedId(null), 2000);
+      }
+    } catch (err) {
+      console.warn('Clipboard image write failed:', err);
+    }
+  };
+
   return (
     <div 
       className="bg-zinc-900/50 border border-zinc-800/50 rounded-2xl p-6 backdrop-blur-sm flex flex-col h-full" 
@@ -248,16 +279,34 @@ export default function ClipboardPanel({ items = [], onPasteItem, onClear, disab
                       className="max-h-48 object-contain rounded-lg"
                     />
                   </div>
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-zinc-400 text-[11px] font-mono truncate">{item.title || 'Image Snippet'}</span>
-                    <a
-                      href={item.content}
-                      download={`pasted-image-${item.id}.png`}
-                      className="text-indigo-400 hover:text-indigo-300 font-medium text-[11px] flex items-center space-x-1"
-                    >
-                      <ArrowDown className="w-3 h-3" />
-                      <span>Save</span>
-                    </a>
+                  <div className="flex justify-between items-center text-xs pt-1">
+                    <span className="text-zinc-400 text-[11px] font-mono truncate max-w-[100px]">{item.title || 'Image Snippet'}</span>
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        onClick={() => handleCopyImage(item.id, item.content)}
+                        className="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center space-x-1 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 rounded-lg px-2 py-0.5 transition-colors"
+                      >
+                        {copiedId === item.id ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-400" />
+                            <span className="text-emerald-400 text-[11px]">Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3" />
+                            <span className="text-[11px]">Copy</span>
+                          </>
+                        )}
+                      </button>
+                      <a
+                        href={item.content}
+                        download={`pasted-image-${item.id}.png`}
+                        className="text-zinc-400 hover:text-white font-medium text-[11px] flex items-center space-x-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg px-2 py-0.5 transition-colors"
+                      >
+                        <ArrowDown className="w-3 h-3" />
+                        <span>Save</span>
+                      </a>
+                    </div>
                   </div>
                 </div>
               ) : (
