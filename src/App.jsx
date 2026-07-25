@@ -4,6 +4,7 @@ import { deriveKey, encryptPayload, decryptPayload } from './lib/crypto';
 import { Shield, Key, Zap, Link2, HardDrive, Lock, Tv } from 'lucide-react';
 import DragDropZone from './components/DragDropZone';
 import ChatPanel from './components/ChatPanel';
+import ClipboardPanel from './components/ClipboardPanel';
 import { sendFileChunks } from './lib/dataChannel';
 import { initializeOPFS, writeChunkToDisk, finalizeFile, autoDownloadFile, initializeIndexedDB, saveMetadata } from './lib/storage';
 import { startHeartbeat, handleHeartbeatMessage, stopHeartbeat, wipeLocalCache } from './lib/ephemerality';
@@ -18,8 +19,9 @@ export default function App() {
   const [isTransferring, setIsTransferring] = useState(false);
   const [receivedFile, setReceivedFile] = useState(null);
 
-  // Chat state
+  // Chat & Clipboard state
   const [messages, setMessages] = useState([]);
+  const [clipboardItems, setClipboardItems] = useState([]);
   const [pipActive, setPipActive] = useState(false);
 
   const cryptoKeyRef = useRef(null);
@@ -66,6 +68,7 @@ export default function App() {
         setIsTransferring(false);
         setReceivedFile(null);
         setMessages([]);
+        setClipboardItems([]);
       }
     };
     window.addEventListener('message', handleMessage);
@@ -87,11 +90,26 @@ export default function App() {
     stopHeartbeat();
     peerConnectionRef.current?.close();
     pendingCandidatesRef.current = [];
+    setClipboardItems([]);
     wipeLocalCache();
   }, []);
 
   const addMessage = useCallback((msg) => {
     setMessages(prev => [...prev, msg]);
+  }, []);
+
+  const handleAddClipboardItem = useCallback((item) => {
+    setClipboardItems(prev => {
+      if (prev.some(i => i.id === item.id)) return prev;
+      return [item, ...prev].slice(0, 20);
+    });
+
+    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+      dataChannelRef.current.send(JSON.stringify({
+        type: 'CLIPBOARD_ITEM',
+        item
+      }));
+    }
   }, []);
 
   const setupDataChannel = useCallback((channel) => {
@@ -122,6 +140,11 @@ export default function App() {
             text: parsed.text,
             sender: 'peer',
             timestamp: parsed.timestamp,
+          });
+        } else if (parsed.type === 'CLIPBOARD_ITEM') {
+          setClipboardItems(prev => {
+            if (prev.some(i => i.id === parsed.item.id)) return prev;
+            return [parsed.item, ...prev].slice(0, 20);
           });
         } else if (parsed.type === 'FILE_METADATA') {
           setIsTransferring(true);
@@ -403,7 +426,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0b] text-zinc-200 font-sans selection:bg-indigo-500/30">
-      <div className="max-w-6xl mx-auto p-4 md:p-8">
+      <div className="max-w-[1600px] mx-auto p-4 md:p-8">
         {/* Header */}
         <header className="flex items-center justify-between mb-10">
           <div className="flex items-center space-x-3">
@@ -441,10 +464,10 @@ export default function App() {
           </div>
         </header>
 
-        {/* 3-column layout */}
-        <main className="grid grid-cols-1 lg:grid-cols-[320px_1fr_320px] gap-6 items-start">
+        {/* 4-column layout */}
+        <main className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-start">
 
-          {/* ── LEFT: Secure Pairing ── */}
+          {/* ── COLUMN 1: Secure Pairing ── */}
           <section>
             <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-2xl p-6 backdrop-blur-sm">
               <h2 className="text-lg font-medium text-white mb-2 flex items-center">
@@ -505,7 +528,7 @@ export default function App() {
             </div>
           </section>
 
-          {/* ── CENTER: Chat ── */}
+          {/* ── COLUMN 2: Chat ── */}
           <section>
             <div
               className="bg-zinc-900/50 border border-zinc-800/50 rounded-2xl p-6 backdrop-blur-sm flex flex-col"
@@ -519,7 +542,17 @@ export default function App() {
             </div>
           </section>
 
-          {/* ── RIGHT: Data Pipeline ── */}
+          {/* ── COLUMN 3: Shared Session Clipboard ── */}
+          <section>
+            <ClipboardPanel
+              items={clipboardItems}
+              onPasteItem={handleAddClipboardItem}
+              onClear={() => setClipboardItems([])}
+              disabled={status !== 'connected'}
+            />
+          </section>
+
+          {/* ── COLUMN 4: Data Pipeline ── */}
           <section>
             <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-2xl p-6 backdrop-blur-sm flex flex-col" style={{ minHeight: 520 }}>
               <h2 className="text-lg font-medium text-white mb-2 flex items-center">
