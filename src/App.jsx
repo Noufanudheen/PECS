@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { deriveKey, encryptPayload, decryptPayload } from './lib/crypto';
-import { Shield, Key, Zap, Link2, HardDrive, Lock } from 'lucide-react';
+import { Shield, Key, Zap, Link2, HardDrive, Lock, Tv } from 'lucide-react';
 import DragDropZone from './components/DragDropZone';
 import ChatPanel from './components/ChatPanel';
 import { sendFileChunks } from './lib/dataChannel';
 import { initializeOPFS, writeChunkToDisk, finalizeFile, autoDownloadFile, initializeIndexedDB, saveMetadata } from './lib/storage';
 import { startHeartbeat, handleHeartbeatMessage, stopHeartbeat, wipeLocalCache } from './lib/ephemerality';
+import { updateBackgroundPiPState, togglePictureInPicture, requestWakeLock, releaseWakeLock } from './lib/backgroundMode';
 
 export default function App() {
   const [roomCode, setRoomCode] = useState('');
@@ -19,6 +20,7 @@ export default function App() {
 
   // Chat state
   const [messages, setMessages] = useState([]);
+  const [pipActive, setPipActive] = useState(false);
 
   const cryptoKeyRef = useRef(null);
   const socketRef = useRef(null);
@@ -31,7 +33,27 @@ export default function App() {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' }
-    ]
+    ],
+    iceCandidatePoolSize: 10,
+  };
+
+  // Sync state with Picture-in-Picture dynamic stream HUD
+  useEffect(() => {
+    updateBackgroundPiPState(status, transferProgress, currentRoom, isTransferring);
+  }, [status, transferProgress, currentRoom, isTransferring]);
+
+  // Request Screen Wake Lock during active file transfers to prevent OS sleep
+  useEffect(() => {
+    if (isTransferring) {
+      requestWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+  }, [isTransferring]);
+
+  const handleTogglePiP = async () => {
+    const active = await togglePictureInPicture();
+    setPipActive(active);
   };
 
   useEffect(() => {
@@ -394,14 +416,29 @@ export default function App() {
             </div>
           </div>
 
-          {/* Global status badge */}
-          {status !== 'disconnected' && (
-            <div className={`px-3 py-1 rounded-full text-xs font-medium border flex items-center space-x-2 ${statusBadge}`}>
-              <div className={`w-1.5 h-1.5 rounded-full ${statusDot}`} />
-              <span>{statusLabel}</span>
-              {currentRoom && <span className="font-mono opacity-60">· {currentRoom}</span>}
-            </div>
-          )}
+          {/* Global status & PiP control badge */}
+          <div className="flex items-center space-x-3">
+            {status !== 'disconnected' && (
+              <div className={`px-3 py-1 rounded-full text-xs font-medium border flex items-center space-x-2 ${statusBadge}`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${statusDot}`} />
+                <span>{statusLabel}</span>
+                {currentRoom && <span className="font-mono opacity-60">· {currentRoom}</span>}
+              </div>
+            )}
+
+            <button
+              onClick={handleTogglePiP}
+              title="Pop out Picture-in-Picture window to keep P2P transfer active in background when tab is hidden"
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all flex items-center space-x-1.5 ${
+                pipActive
+                  ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-lg shadow-indigo-500/10'
+                  : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border-zinc-800'
+              }`}
+            >
+              <Tv className="w-3.5 h-3.5" />
+              <span>{pipActive ? 'PiP Active' : 'Background Mode'}</span>
+            </button>
+          </div>
         </header>
 
         {/* 3-column layout */}
