@@ -419,7 +419,11 @@ export default function App() {
         
         try {
           const payload = await decryptPayload(cryptoKeyRef.current, encryptedPayload);
-          const senderId = payload.senderId;
+          const senderId = encryptedPayload.senderId;
+          if (!senderId) {
+            console.error("❌ [WebRTC] Missing senderId on incoming signal!");
+            return;
+          }
           console.log(`📥 [Socket.io] Decrypted signal: type = ${payload.type} from ${senderId}`);
           
           let pc = peersRef.current.get(senderId);
