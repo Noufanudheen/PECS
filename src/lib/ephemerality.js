@@ -1,16 +1,14 @@
-let heartbeatInterval;
-let missedBeats = 0;
-const MAX_MISSED_BEATS = 3;
-
 export function startHeartbeat(channel, handleDisconnection) {
-  missedBeats = 0;
-  heartbeatInterval = setInterval(() => {
+  channel._missedBeats = 0;
+  if (channel._heartbeatInterval) clearInterval(channel._heartbeatInterval);
+
+  channel._heartbeatInterval = setInterval(() => {
     if (channel.readyState === 'open') {
       try {
         channel.send(JSON.stringify({ type: 'HEARTBEAT_PING' }));
-        missedBeats++;
+        channel._missedBeats = (channel._missedBeats || 0) + 1;
 
-        if (missedBeats >= MAX_MISSED_BEATS) {
+        if (channel._missedBeats >= MAX_MISSED_BEATS) {
           handleDisconnection();
         }
       } catch (err) {
@@ -30,13 +28,14 @@ export function handleHeartbeatMessage(channel, parsedMessage) {
       }
     }
   } else if (parsedMessage.type === 'HEARTBEAT_PONG') {
-    missedBeats = 0;
+    channel._missedBeats = 0;
   }
 }
 
-export function stopHeartbeat() {
-  if (heartbeatInterval) {
-    clearInterval(heartbeatInterval);
+export function stopHeartbeat(channel) {
+  if (channel && channel._heartbeatInterval) {
+    clearInterval(channel._heartbeatInterval);
+    channel._heartbeatInterval = null;
   }
 }
 

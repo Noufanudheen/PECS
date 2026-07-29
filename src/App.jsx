@@ -140,7 +140,10 @@ export default function App() {
   }, []);
 
   const updateConnectionStatus = useCallback((room = currentRoom) => {
-    const activeCount = dataChannelsRef.current.size;
+    let activeCount = 0;
+    dataChannelsRef.current.forEach((dc) => {
+      if (dc.readyState === 'open') activeCount++;
+    });
     setConnectedPeersCount(activeCount);
     if (activeCount > 0) {
       setStatus('connected');
