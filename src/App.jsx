@@ -603,7 +603,7 @@ export default function App() {
   }[status];
 
   const statusLabel = status === 'connected' 
-    ? `Connected (${connectedPeersCount})` 
+    ? `Connected (${connectedPeersCount + 1})` 
     : {
         waiting:     'Waiting for Peers',
         connecting:  'Connecting…',
