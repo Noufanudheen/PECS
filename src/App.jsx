@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { deriveKey, encryptPayload, decryptPayload } from './lib/crypto';
-import { Shield, Key, Zap, Link2, HardDrive, Lock, Tv } from 'lucide-react';
+import { Shield, Key, Zap, Link2, HardDrive, Lock, Tv, Wifi, Globe } from 'lucide-react';
 import DragDropZone from './components/DragDropZone';
 import ChatPanel from './components/ChatPanel';
 import ClipboardPanel from './components/ClipboardPanel';
@@ -19,10 +19,23 @@ export default function App() {
   const [isTransferring, setIsTransferring] = useState(false);
   const [receivedFile, setReceivedFile] = useState(null);
 
-  // Chat & Clipboard state
+  // Chat, Clipboard & Network Sync state
   const [messages, setMessages] = useState([]);
   const [clipboardItems, setClipboardItems] = useState([]);
   const [pipActive, setPipActive] = useState(false);
+  const [allowMultiNetwork, setAllowMultiNetwork] = useState(() => {
+    return localStorage.getItem('pecs_allow_multi_network') === 'true';
+  });
+
+  const allowMultiNetworkRef = useRef(allowMultiNetwork);
+  useEffect(() => {
+    allowMultiNetworkRef.current = allowMultiNetwork;
+    localStorage.setItem('pecs_allow_multi_network', String(allowMultiNetwork));
+  }, [allowMultiNetwork]);
+
+  const handleToggleMultiNetwork = () => {
+    setAllowMultiNetwork(prev => !prev);
+  };
 
   const cryptoKeyRef = useRef(null);
   const socketRef = useRef(null);
@@ -31,13 +44,22 @@ export default function App() {
   const dbRef = useRef(null);
   const pendingCandidatesRef = useRef([]);
 
-  const configuration = {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' }
-    ],
-    iceCandidatePoolSize: 10,
-  };
+  const getRTCConfiguration = useCallback(() => {
+    if (allowMultiNetworkRef.current) {
+      return {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ],
+        iceCandidatePoolSize: 10,
+      };
+    }
+    // Strict LAN Mode: Zero STUN servers for local-only network isolation
+    return {
+      iceServers: [],
+      iceCandidatePoolSize: 5,
+    };
+  }, []);
 
   // Sync state with Picture-in-Picture dynamic stream HUD
   useEffect(() => {
@@ -189,8 +211,8 @@ export default function App() {
   }, [handleDisconnection, addMessage]);
 
   const setupWebRTC = async (socket, room) => {
-    console.log("⚙️ [WebRTC] Initializing RTCPeerConnection...");
-    const pc = new RTCPeerConnection(configuration);
+    console.log(`⚙️ [WebRTC] Initializing RTCPeerConnection (MultiNetwork: ${allowMultiNetworkRef.current})...`);
+    const pc = new RTCPeerConnection(getRTCConfiguration());
     peerConnectionRef.current = pc;
 
     pc.ondatachannel = (event) => {
@@ -202,7 +224,14 @@ export default function App() {
     pc.onicecandidate = async (event) => {
       if (pc !== peerConnectionRef.current) return;
       if (event.candidate && cryptoKeyRef.current) {
-        console.log("gb [Socket.io] Emitting ICE candidate to peer...");
+        const candStr = event.candidate.candidate || '';
+        // In Strict LAN mode (allowMultiNetwork === false), filter out non-LAN candidates
+        if (!allowMultiNetworkRef.current && (candStr.includes('typ srflx') || candStr.includes('typ relay'))) {
+          console.log("🔒 [WebRTC] Strict LAN Mode: Suppressing non-LAN candidate:", candStr);
+          return;
+        }
+
+        console.log("📤 [Socket.io] Emitting ICE candidate to peer...");
         const encryptedCandidate = await encryptPayload(cryptoKeyRef.current, {
           roomId: room,
           type: 'ice-candidate',
@@ -311,6 +340,11 @@ export default function App() {
             console.log(`⚙️ [WebRTC] Processing ${pendingCandidatesRef.current.length} queued ICE candidates...`);
             for (const candidate of pendingCandidatesRef.current) {
               try {
+                const candStr = candidate?.candidate || '';
+                if (!allowMultiNetworkRef.current && (candStr.includes('typ srflx') || candStr.includes('typ relay'))) {
+                  console.log("🔒 [WebRTC] Strict LAN Mode: Skipping queued non-LAN candidate");
+                  continue;
+                }
                 await pc.addIceCandidate(new RTCIceCandidate(candidate));
               } catch (e) {
                 console.error("❌ [WebRTC] Error adding queued ice candidate", e);
@@ -336,6 +370,11 @@ export default function App() {
             console.log(`⚙️ [WebRTC] Processing ${pendingCandidatesRef.current.length} queued ICE candidates...`);
             for (const candidate of pendingCandidatesRef.current) {
               try {
+                const candStr = candidate?.candidate || '';
+                if (!allowMultiNetworkRef.current && (candStr.includes('typ srflx') || candStr.includes('typ relay'))) {
+                  console.log("🔒 [WebRTC] Strict LAN Mode: Skipping queued non-LAN candidate");
+                  continue;
+                }
                 await pc.addIceCandidate(new RTCIceCandidate(candidate));
               } catch (e) {
                 console.error("❌ [WebRTC] Error adding queued ice candidate", e);
@@ -343,12 +382,17 @@ export default function App() {
             }
             pendingCandidatesRef.current = [];
           } else if (payload.type === 'ice-candidate') {
-            if (pc.remoteDescription) {
-              console.log("⚙️ [WebRTC] Adding ICE candidate directly...");
-              await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+            const candStr = payload.candidate?.candidate || '';
+            if (!allowMultiNetworkRef.current && (candStr.includes('typ srflx') || candStr.includes('typ relay'))) {
+              console.log("🔒 [WebRTC] Strict LAN Mode: Suppressing remote non-LAN candidate");
             } else {
-              console.log("⚙️ [WebRTC] Queueing ICE candidate (remoteDescription is null)...");
-              pendingCandidatesRef.current.push(payload.candidate);
+              if (pc.remoteDescription) {
+                console.log("⚙️ [WebRTC] Adding ICE candidate directly...");
+                await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+              } else {
+                console.log("⚙️ [WebRTC] Queueing ICE candidate (remoteDescription is null)...");
+                pendingCandidatesRef.current.push(payload.candidate);
+              }
             }
           }
         } catch (error) {
@@ -459,8 +503,35 @@ export default function App() {
             </div>
           </div>
 
-          {/* Integrated Pairing Controls */}
+          {/* Integrated Pairing & Network Controls */}
           <div className="flex flex-wrap items-center gap-3">
+            {/* Multi-Network / Local LAN Sync Toggle */}
+            <button
+              onClick={handleToggleMultiNetwork}
+              title={
+                allowMultiNetwork
+                  ? "Multi-Network Sync ON: STUN enabled. Connects devices across different networks (4G/Wi-Fi)"
+                  : "Strict LAN Mode ON: Zero STUN. Strictly pairs devices on the SAME local network (Wi-Fi/Ethernet)"
+              }
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all flex items-center space-x-1.5 ${
+                allowMultiNetwork
+                  ? 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20'
+                  : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20'
+              }`}
+            >
+              {allowMultiNetwork ? (
+                <>
+                  <Globe className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Multi-Network (4G/WAN)</span>
+                </>
+              ) : (
+                <>
+                  <Wifi className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Strict LAN Only</span>
+                </>
+              )}
+            </button>
+
             {status === 'disconnected' ? (
               <form onSubmit={handleJoin} className="flex items-center space-x-2 w-full sm:w-auto">
                 <div className="relative flex-1 sm:w-64">
