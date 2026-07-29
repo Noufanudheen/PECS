@@ -33,16 +33,47 @@ export default function App() {
     localStorage.setItem('pecs_allow_multi_network', String(allowMultiNetwork));
   }, [allowMultiNetwork]);
 
+  const kickExternalPeers = async () => {
+    console.log("🔒 [WebRTC] Strict LAN Mode enabled. Checking for external connections to kick...");
+    for (const [peerId, pc] of peersRef.current.entries()) {
+      try {
+        const stats = await pc.getStats();
+        let isExternal = false;
+        stats.forEach(report => {
+          if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+            const local = stats.get(report.localCandidateId);
+            const remote = stats.get(report.remoteCandidateId);
+            if (local && (local.candidateType === 'srflx' || local.candidateType === 'relay')) isExternal = true;
+            if (remote && (remote.candidateType === 'srflx' || remote.candidateType === 'relay')) isExternal = true;
+          }
+        });
+        if (isExternal) {
+          console.log(`🔒 [WebRTC] Kicking peer ${peerId} (Active connection is not local).`);
+          handleDisconnection(peerId);
+        }
+      } catch (e) {
+        console.warn("Error checking stats for peer", e);
+      }
+    }
+  };
+
   const handleToggleMultiNetwork = () => {
-    setAllowMultiNetwork(prev => !prev);
+    setAllowMultiNetwork(prev => {
+      const next = !prev;
+      if (!next) kickExternalPeers();
+      return next;
+    });
   };
 
   const cryptoKeyRef = useRef(null);
   const socketRef = useRef(null);
-  const peerConnectionRef = useRef(null);
-  const dataChannelRef = useRef(null);
+  
+  // Multi-peer architecture
+  const peersRef = useRef(new Map()); // peerId -> RTCPeerConnection
+  const dataChannelsRef = useRef(new Map()); // peerId -> RTCDataChannel
+  const pendingCandidatesRef = useRef(new Map()); // peerId -> RTCIceCandidate[]
   const dbRef = useRef(null);
-  const pendingCandidatesRef = useRef([]);
+  const [connectedPeersCount, setConnectedPeersCount] = useState(0);
 
   const getRTCConfiguration = useCallback(() => {
     if (allowMultiNetworkRef.current) {
@@ -103,18 +134,48 @@ export default function App() {
     return () => {
       window.removeEventListener('message', handleMessage);
       socketRef.current?.disconnect();
-      peerConnectionRef.current?.close();
-      stopHeartbeat();
+      peersRef.current.forEach(pc => pc.close());
+      dataChannelsRef.current.forEach(dc => stopHeartbeat(dc));
     };
   }, []);
 
-  const handleDisconnection = useCallback(() => {
-    stopHeartbeat();
-    peerConnectionRef.current?.close();
-    pendingCandidatesRef.current = [];
-    setClipboardItems([]);
-    wipeLocalCache();
-  }, []);
+  const updateConnectionStatus = useCallback((room = currentRoom) => {
+    const activeCount = dataChannelsRef.current.size;
+    setConnectedPeersCount(activeCount);
+    if (activeCount > 0) {
+      setStatus('connected');
+    } else if (room) {
+      setStatus('waiting');
+    } else {
+      setStatus('disconnected');
+    }
+  }, [currentRoom]);
+
+  const handleDisconnection = useCallback((peerId = null) => {
+    if (peerId) {
+      console.log(`[WebRTC] Disconnecting peer: ${peerId}`);
+      const pc = peersRef.current.get(peerId);
+      if (pc) pc.close();
+      peersRef.current.delete(peerId);
+      
+      const dc = dataChannelsRef.current.get(peerId);
+      if (dc) stopHeartbeat(dc);
+      dataChannelsRef.current.delete(peerId);
+      
+      pendingCandidatesRef.current.delete(peerId);
+      updateConnectionStatus();
+    } else {
+      console.log(`[WebRTC] Disconnecting all peers`);
+      peersRef.current.forEach(pc => pc.close());
+      peersRef.current.clear();
+      dataChannelsRef.current.forEach(dc => stopHeartbeat(dc));
+      dataChannelsRef.current.clear();
+      pendingCandidatesRef.current.clear();
+      setClipboardItems([]);
+      wipeLocalCache();
+      updateConnectionStatus(null);
+    }
+  }, [updateConnectionStatus]);
 
   const addMessage = useCallback((msg) => {
     setMessages(prev => [...prev, msg]);
@@ -137,32 +198,34 @@ export default function App() {
       return [item, ...prev].slice(0, 20);
     });
 
-    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
-      dataChannelRef.current.send(JSON.stringify({
-        type: 'CLIPBOARD_ITEM',
-        item: payloadItem
-      }));
-    }
+    dataChannelsRef.current.forEach(channel => {
+      if (channel.readyState === 'open') {
+        channel.send(JSON.stringify({
+          type: 'CLIPBOARD_ITEM',
+          item: payloadItem
+        }));
+      }
+    });
   }, []);
 
-  const setupDataChannel = useCallback((channel) => {
-    dataChannelRef.current = channel;
+  const setupDataChannel = useCallback((peerId, channel) => {
+    dataChannelsRef.current.set(peerId, channel);
     channel.binaryType = "arraybuffer";
     channel.bufferedAmountLowThreshold = 65536;
 
     channel.onopen = () => {
-      if (channel !== dataChannelRef.current) return;
-      setStatus('connected');
-      startHeartbeat(channel, handleDisconnection);
+      if (channel !== dataChannelsRef.current.get(peerId)) return;
+      updateConnectionStatus();
+      startHeartbeat(channel, () => handleDisconnection(peerId));
     };
 
     channel.onclose = () => {
-      if (channel !== dataChannelRef.current) return;
-      handleDisconnection();
+      if (channel !== dataChannelsRef.current.get(peerId)) return;
+      handleDisconnection(peerId);
     };
 
     channel.onmessage = async (event) => {
-      if (channel !== dataChannelRef.current) return;
+      if (channel !== dataChannelsRef.current.get(peerId)) return;
       if (typeof event.data === 'string') {
         const parsed = JSON.parse(event.data);
         if (parsed.type === 'HEARTBEAT_PING' || parsed.type === 'HEARTBEAT_PONG') {
@@ -188,6 +251,31 @@ export default function App() {
             }
             return [parsed.item, ...prev].slice(0, 20);
           });
+          
+          // Auto-copy clipboard logic
+          try {
+            if (document.hasFocus()) {
+              if (parsed.item.itemType === 'text') {
+                await navigator.clipboard.writeText(parsed.item.content);
+              } else if (parsed.item.itemType === 'image') {
+                const res = await fetch(parsed.item.content);
+                const blob = await res.blob();
+                let clipboardBlob = blob;
+                if (blob.type !== 'image/png') {
+                  const bmp = await createImageBitmap(blob);
+                  const canvas = document.createElement('canvas');
+                  canvas.width = bmp.width;
+                  canvas.height = bmp.height;
+                  const ctx = canvas.getContext('2d');
+                  ctx.drawImage(bmp, 0, 0);
+                  clipboardBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+                }
+                await navigator.clipboard.write([new ClipboardItem({ 'image/png': clipboardBlob })]);
+              }
+            }
+          } catch (e) {
+            console.warn('WebRTC Clipboard auto-copy skipped:', e);
+          }
         } else if (parsed.type === 'FILE_METADATA') {
           setIsTransferring(true);
           setTransferProgress(0);
@@ -198,7 +286,6 @@ export default function App() {
           }
         } else if (parsed.type === 'EOF') {
           await finalizeFile();
-          // Auto-download from OPFS if available
           await autoDownloadFile();
           setIsTransferring(false);
           setTransferProgress(100);
@@ -208,32 +295,34 @@ export default function App() {
         await writeChunkToDisk(event.data);
       }
     };
-  }, [handleDisconnection, addMessage]);
+  }, [handleDisconnection, addMessage, updateConnectionStatus]);
 
-  const setupWebRTC = async (socket, room) => {
-    console.log(`⚙️ [WebRTC] Initializing RTCPeerConnection (MultiNetwork: ${allowMultiNetworkRef.current})...`);
+  const setupWebRTC = async (peerId, socket, room) => {
+    console.log(`⚙️ [WebRTC] Initializing RTCPeerConnection for ${peerId} (MultiNetwork: ${allowMultiNetworkRef.current})...`);
     const pc = new RTCPeerConnection(getRTCConfiguration());
-    peerConnectionRef.current = pc;
+    peersRef.current.set(peerId, pc);
+    pendingCandidatesRef.current.set(peerId, []);
 
     pc.ondatachannel = (event) => {
-      if (pc !== peerConnectionRef.current) return;
-      console.log("📥 [WebRTC] Received remote data channel!");
-      setupDataChannel(event.channel);
+      if (pc !== peersRef.current.get(peerId)) return;
+      console.log(`📥 [WebRTC] Received remote data channel from ${peerId}!`);
+      setupDataChannel(peerId, event.channel);
     };
 
     pc.onicecandidate = async (event) => {
-      if (pc !== peerConnectionRef.current) return;
+      if (pc !== peersRef.current.get(peerId)) return;
       if (event.candidate && cryptoKeyRef.current) {
         const candStr = event.candidate.candidate || '';
         // In Strict LAN mode (allowMultiNetwork === false), filter out non-LAN candidates
         if (!allowMultiNetworkRef.current && (candStr.includes('typ srflx') || candStr.includes('typ relay'))) {
-          console.log("🔒 [WebRTC] Strict LAN Mode: Suppressing non-LAN candidate:", candStr);
+          console.log(`🔒 [WebRTC] Strict LAN Mode: Suppressing non-LAN candidate for ${peerId}:`, candStr);
           return;
         }
 
-        console.log("📤 [Socket.io] Emitting ICE candidate to peer...");
+        console.log(`📤 [Socket.io] Emitting ICE candidate to peer ${peerId}...`);
         const encryptedCandidate = await encryptPayload(cryptoKeyRef.current, {
           roomId: room,
+          targetId: peerId,
           type: 'ice-candidate',
           candidate: event.candidate
         });
@@ -242,15 +331,14 @@ export default function App() {
     };
 
     pc.onconnectionstatechange = () => {
-      if (pc !== peerConnectionRef.current) return;
-      console.log(`⚙️ [WebRTC] Connection state changed to: ${pc.connectionState}`);
-      if (pc.connectionState === 'connected') {
-        setStatus('connected');
-      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-        handleDisconnection();
+      if (pc !== peersRef.current.get(peerId)) return;
+      console.log(`⚙️ [WebRTC] Connection state for ${peerId} changed to: ${pc.connectionState}`);
+      updateConnectionStatus();
+      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        handleDisconnection(peerId);
       }
     };
-    setStatus('waiting');
+    return pc;
   };
 
   const handleJoin = async (e, overrideRoomCode) => {
@@ -259,15 +347,16 @@ export default function App() {
     if (!activeRoom.trim()) return;
     
     // Clean up any existing connection first
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
-    }
+    peersRef.current.forEach(pc => pc.close());
+    peersRef.current.clear();
+    dataChannelsRef.current.forEach(dc => stopHeartbeat(dc));
+    dataChannelsRef.current.clear();
+
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current = null;
     }
-    pendingCandidatesRef.current = [];
+    pendingCandidatesRef.current.clear();
     
     setStatus('connecting');
     
@@ -282,67 +371,73 @@ export default function App() {
         if (socket !== socketRef.current) return;
         console.log(`🟢 [Socket.io] Connected successfully. Joining room: ${activeRoom}`);
         socket.emit('join-room', activeRoom);
-        setupWebRTC(socket, activeRoom);
       });
 
       socket.on('connect_error', (err) => {
         console.error("❌ [Socket.io] Connection error:", err.message, err);
       });
 
-      socket.on('user-joined', async () => {
+      socket.on('user-joined', async (data) => {
         if (socket !== socketRef.current) return;
-        console.log("📥 [Socket.io] Received 'user-joined' event from peer. Initiating WebRTC...");
-        if (!cryptoKeyRef.current || !peerConnectionRef.current) {
-          console.warn("⚠️ [Socket.io] user-joined received but cryptoKey or peerConnection is null!");
-          return;
-        }
+        const targetId = data.peerId;
+        console.log(`📥 [Socket.io] Received 'user-joined' from ${targetId}. Initiating WebRTC...`);
+        if (!cryptoKeyRef.current) return;
         
         try {
-          const pc = peerConnectionRef.current;
+          const pc = await setupWebRTC(targetId, socket, activeRoom);
           
-          // Initiator creates the data channel
-          console.log("⚙️ [WebRTC] Creating data channel 'fileTransferChannel'...");
+          console.log(`⚙️ [WebRTC] Creating data channel for ${targetId}...`);
           const dc = pc.createDataChannel("fileTransferChannel");
-          setupDataChannel(dc);
+          setupDataChannel(targetId, dc);
 
-          console.log("⚙️ [WebRTC] Creating local SDP offer...");
+          console.log(`⚙️ [WebRTC] Creating local SDP offer for ${targetId}...`);
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           
-          console.log("📤 [Socket.io] Encrypting and sending SDP offer...");
+          console.log(`📤 [Socket.io] Sending SDP offer to ${targetId}...`);
           const encryptedOffer = await encryptPayload(cryptoKeyRef.current, {
             roomId: activeRoom,
+            targetId: targetId,
             type: 'offer',
             offer
           });
           socket.emit('signal', encryptedOffer);
         } catch (error) {
-          console.error("❌ [WebRTC] Failed to create offer on user join", error);
+          console.error(`❌ [WebRTC] Failed to create offer for ${targetId}`, error);
         }
+      });
+
+      socket.on('user-left', (data) => {
+        if (socket !== socketRef.current) return;
+        console.log(`[Socket.io] user-left received for ${data.peerId}`);
+        handleDisconnection(data.peerId);
       });
 
       socket.on('signal', async (encryptedPayload) => {
         if (socket !== socketRef.current) return;
-        if (!cryptoKeyRef.current || !peerConnectionRef.current) {
-          console.warn("⚠️ [Socket.io] signal received but cryptoKey or peerConnection is null!");
-          return;
-        }
+        if (!cryptoKeyRef.current) return;
         
         try {
           const payload = await decryptPayload(cryptoKeyRef.current, encryptedPayload);
-          console.log(`📥 [Socket.io] Decrypted signal: type = ${payload.type}`);
-          const pc = peerConnectionRef.current;
+          const senderId = payload.senderId;
+          console.log(`📥 [Socket.io] Decrypted signal: type = ${payload.type} from ${senderId}`);
+          
+          let pc = peersRef.current.get(senderId);
+          if (!pc && payload.type === 'offer') {
+            pc = await setupWebRTC(senderId, socket, activeRoom);
+          }
+          if (!pc) return;
 
           if (payload.type === 'offer') {
-            console.log("⚙️ [WebRTC] Setting remote SDP offer...");
+            console.log(`⚙️ [WebRTC] Setting remote SDP offer from ${senderId}...`);
             await pc.setRemoteDescription(new RTCSessionDescription(payload.offer));
             // Flush any queued candidates
-            console.log(`⚙️ [WebRTC] Processing ${pendingCandidatesRef.current.length} queued ICE candidates...`);
-            for (const candidate of pendingCandidatesRef.current) {
+            console.log(`⚙️ [WebRTC] Processing queued ICE candidates for ${senderId}...`);
+            const queued = pendingCandidatesRef.current.get(senderId) || [];
+            for (const candidate of queued) {
               try {
                 const candStr = candidate?.candidate || '';
                 if (!allowMultiNetworkRef.current && (candStr.includes('typ srflx') || candStr.includes('typ relay'))) {
-                  console.log("🔒 [WebRTC] Strict LAN Mode: Skipping queued non-LAN candidate");
                   continue;
                 }
                 await pc.addIceCandidate(new RTCIceCandidate(candidate));
@@ -350,29 +445,29 @@ export default function App() {
                 console.error("❌ [WebRTC] Error adding queued ice candidate", e);
               }
             }
-            pendingCandidatesRef.current = [];
+            pendingCandidatesRef.current.set(senderId, []);
 
-            console.log("⚙️ [WebRTC] Creating local SDP answer...");
+            console.log(`⚙️ [WebRTC] Creating local SDP answer for ${senderId}...`);
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             
-            console.log("📤 [Socket.io] Encrypting and sending SDP answer...");
+            console.log(`📤 [Socket.io] Sending SDP answer to ${senderId}...`);
             const encryptedAnswer = await encryptPayload(cryptoKeyRef.current, {
               roomId: activeRoom,
+              targetId: senderId,
               type: 'answer',
               answer
             });
             socket.emit('signal', encryptedAnswer);
           } else if (payload.type === 'answer') {
-            console.log("⚙️ [WebRTC] Setting remote SDP answer...");
+            console.log(`⚙️ [WebRTC] Setting remote SDP answer from ${senderId}...`);
             await pc.setRemoteDescription(new RTCSessionDescription(payload.answer));
             // Flush any queued candidates
-            console.log(`⚙️ [WebRTC] Processing ${pendingCandidatesRef.current.length} queued ICE candidates...`);
-            for (const candidate of pendingCandidatesRef.current) {
+            const queued = pendingCandidatesRef.current.get(senderId) || [];
+            for (const candidate of queued) {
               try {
                 const candStr = candidate?.candidate || '';
                 if (!allowMultiNetworkRef.current && (candStr.includes('typ srflx') || candStr.includes('typ relay'))) {
-                  console.log("🔒 [WebRTC] Strict LAN Mode: Skipping queued non-LAN candidate");
                   continue;
                 }
                 await pc.addIceCandidate(new RTCIceCandidate(candidate));
@@ -380,18 +475,19 @@ export default function App() {
                 console.error("❌ [WebRTC] Error adding queued ice candidate", e);
               }
             }
-            pendingCandidatesRef.current = [];
+            pendingCandidatesRef.current.set(senderId, []);
           } else if (payload.type === 'ice-candidate') {
             const candStr = payload.candidate?.candidate || '';
             if (!allowMultiNetworkRef.current && (candStr.includes('typ srflx') || candStr.includes('typ relay'))) {
-              console.log("🔒 [WebRTC] Strict LAN Mode: Suppressing remote non-LAN candidate");
+              console.log(`🔒 [WebRTC] Strict LAN Mode: Suppressing remote non-LAN candidate from ${senderId}`);
             } else {
               if (pc.remoteDescription) {
-                console.log("⚙️ [WebRTC] Adding ICE candidate directly...");
                 await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
               } else {
-                console.log("⚙️ [WebRTC] Queueing ICE candidate (remoteDescription is null)...");
-                pendingCandidatesRef.current.push(payload.candidate);
+                console.log(`⚙️ [WebRTC] Queueing ICE candidate for ${senderId}...`);
+                const queue = pendingCandidatesRef.current.get(senderId) || [];
+                queue.push(payload.candidate);
+                pendingCandidatesRef.current.set(senderId, queue);
               }
             }
           }
@@ -429,7 +525,11 @@ export default function App() {
   // ==========================================
 
   const handleFileSelect = (file) => {
-    if (!dataChannelRef.current || dataChannelRef.current.readyState !== 'open') return;
+    let hasOpenChannel = false;
+    dataChannelsRef.current.forEach(channel => {
+      if (channel.readyState === 'open') hasOpenChannel = true;
+    });
+    if (!hasOpenChannel) return;
     
     setIsTransferring(true);
     setTransferProgress(0);
@@ -438,33 +538,50 @@ export default function App() {
       ? crypto.randomUUID() 
       : Math.random().toString(36).substring(2) + Date.now().toString(36);
 
-    dataChannelRef.current.send(JSON.stringify({
+    const metadataPayload = JSON.stringify({
       type: 'FILE_METADATA',
       id: uuid,
       name: file.name,
       size: file.size,
       mimeType: file.type
-    }));
+    });
 
-    sendFileChunks(file, dataChannelRef.current, (progress) => {
-      setTransferProgress(progress);
-      if (progress >= 100) {
-        setIsTransferring(false);
+    dataChannelsRef.current.forEach(channel => {
+      if (channel.readyState === 'open') {
+        channel.send(metadataPayload);
+        sendFileChunks(file, channel, (progress) => {
+          setTransferProgress(progress);
+          if (progress >= 100) {
+            setIsTransferring(false);
+          }
+        });
       }
     });
   };
 
   const handleSendChat = useCallback((text) => {
-    if (!dataChannelRef.current || dataChannelRef.current.readyState !== 'open') return;
+    let hasOpenChannel = false;
+    dataChannelsRef.current.forEach(channel => {
+      if (channel.readyState === 'open') hasOpenChannel = true;
+    });
+    if (!hasOpenChannel) return;
+
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
     const msg = { id, text, sender: 'me', timestamp: Date.now() };
     addMessage(msg);
-    dataChannelRef.current.send(JSON.stringify({
+    
+    const payload = JSON.stringify({
       type: 'CHAT_MESSAGE',
       id,
       text,
       timestamp: msg.timestamp,
-    }));
+    });
+
+    dataChannelsRef.current.forEach(channel => {
+      if (channel.readyState === 'open') {
+        channel.send(payload);
+      }
+    });
   }, [addMessage]);
 
   const statusBadge = {
@@ -481,12 +598,13 @@ export default function App() {
     disconnected:'bg-zinc-600',
   }[status];
 
-  const statusLabel = {
-    connected:   'Connected',
-    waiting:     'Waiting for Peer',
-    connecting:  'Connecting…',
-    disconnected:'Disconnected',
-  }[status];
+  const statusLabel = status === 'connected' 
+    ? `Connected (${connectedPeersCount})` 
+    : {
+        waiting:     'Waiting for Peers',
+        connecting:  'Connecting…',
+        disconnected:'Disconnected',
+      }[status];
 
   return (
     <div className="min-h-screen bg-[#0a0a0b] text-zinc-200 font-sans selection:bg-indigo-500/30">
