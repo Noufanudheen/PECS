@@ -213,11 +213,16 @@ export default function App() {
     channel.binaryType = "arraybuffer";
     channel.bufferedAmountLowThreshold = 65536;
 
-    channel.onopen = () => {
+    const handleOpen = () => {
       if (channel !== dataChannelsRef.current.get(peerId)) return;
       updateConnectionStatus();
       startHeartbeat(channel, () => handleDisconnection(peerId));
     };
+
+    channel.onopen = handleOpen;
+    if (channel.readyState === 'open') {
+      handleOpen();
+    }
 
     channel.onclose = () => {
       if (channel !== dataChannelsRef.current.get(peerId)) return;
