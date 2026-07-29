@@ -8,3 +8,5 @@ coverage/
 !.env.example
 DOCUMENTATION.md
 test_plan.md
+SCRUM_BOOK_NOTES.md
+SCRUM_NOTES.md
