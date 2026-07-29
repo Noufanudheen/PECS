@@ -32,17 +32,17 @@ async function testSignaling() {
       }, 500);
     });
 
-    client1.on('user-joined', () => {
+    client1.on('user-joined', (data) => {
       console.log("✅ Client 1 received 'user-joined' event when Client 2 joined room");
       roomJoinedEvents++;
-      client1.emit('signal', { roomId: ROOM, type: 'offer', offer: { sdp: 'mock-sdp-offer' } });
+      client1.emit('signal', { roomId: ROOM, targetId: data.peerId, type: 'offer', offer: { sdp: 'mock-sdp-offer' } });
     });
 
     client2.on('signal', (payload) => {
       console.log("✅ Client 2 received encrypted signal payload from Client 1:", payload.type);
       if (payload.type === 'offer') {
         signalsExchanged++;
-        client2.emit('signal', { roomId: ROOM, type: 'answer', answer: { sdp: 'mock-sdp-answer' } });
+        client2.emit('signal', { roomId: ROOM, targetId: payload.senderId, type: 'answer', answer: { sdp: 'mock-sdp-answer' } });
       }
     });
 

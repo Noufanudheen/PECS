@@ -326,7 +326,7 @@ export default function App() {
           type: 'ice-candidate',
           candidate: event.candidate
         });
-        socket.emit('signal', encryptedCandidate);
+        socket.emit('signal', { ...encryptedCandidate, targetId: peerId });
       }
     };
 
@@ -401,7 +401,7 @@ export default function App() {
             type: 'offer',
             offer
           });
-          socket.emit('signal', encryptedOffer);
+          socket.emit('signal', { ...encryptedOffer, targetId: targetId });
         } catch (error) {
           console.error(`❌ [WebRTC] Failed to create offer for ${targetId}`, error);
         }
@@ -458,7 +458,7 @@ export default function App() {
               type: 'answer',
               answer
             });
-            socket.emit('signal', encryptedAnswer);
+            socket.emit('signal', { ...encryptedAnswer, targetId: senderId });
           } else if (payload.type === 'answer') {
             console.log(`⚙️ [WebRTC] Setting remote SDP answer from ${senderId}...`);
             await pc.setRemoteDescription(new RTCSessionDescription(payload.answer));
