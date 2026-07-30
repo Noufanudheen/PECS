@@ -12,3 +12,5 @@ SCRUM_BOOK_NOTES.md
 SCRUM_NOTES.md
 *.pem
 *.crx
+*.zip
+extension/builds/
