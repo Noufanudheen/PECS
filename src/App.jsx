@@ -211,6 +211,22 @@ export default function App() {
     });
   }, []);
 
+  useEffect(() => {
+    // Listen for incoming auto-clipboard syncs from the browser extension content script
+    const handleExtensionMessage = (e) => {
+      if (e.data?.type === 'EXTENSION_CLIPBOARD_ITEM') {
+        handleAddClipboardItem({
+          id: 'ext_' + Date.now().toString(36) + Math.random().toString(36).slice(2),
+          itemType: e.data.itemType,
+          content: e.data.content,
+          timestamp: e.data.timestamp || Date.now()
+        });
+      }
+    };
+    window.addEventListener('message', handleExtensionMessage);
+    return () => window.removeEventListener('message', handleExtensionMessage);
+  }, [handleAddClipboardItem]);
+
   const setupDataChannel = useCallback((peerId, channel) => {
     dataChannelsRef.current.set(peerId, channel);
     channel.binaryType = "arraybuffer";
