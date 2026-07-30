@@ -2,7 +2,13 @@
   "manifest_version": 3,
   "name": "PECS Auto-Clipboard",
   "version": "1.0",
-  "description": "Automatically syncs system clipboard to the PECS web app.",
+  "description": "Auto-syncs clipboard across PECS WebRTC Network.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "pecs@noufanudheen.com",
+      "strict_min_version": "109.0"
+    }
+  },
   "permissions": [
     "clipboardRead",
     "storage",
@@ -16,6 +22,7 @@
   ],
   "background": {
     "service_worker": "background.js",
+    "scripts": ["background.js"],
     "type": "module"
   },
   "action": {

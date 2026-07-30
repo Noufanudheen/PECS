@@ -48,6 +48,31 @@ async function checkClipboard() {
     return;
   }
 
+  // Firefox MV3 uses background Event Pages (which have a DOM).
+  if (typeof document !== 'undefined') {
+    try {
+      let ta = document.getElementById('pecs-clipboard-ta');
+      if (!ta) {
+        ta = document.createElement('textarea');
+        ta.id = 'pecs-clipboard-ta';
+        document.body.appendChild(ta);
+      }
+      ta.value = '';
+      ta.focus();
+      document.execCommand('paste');
+      
+      if (ta.value) {
+        processClipboardData(ta.value);
+      } else {
+        console.log("[PECS Extension] Firefox polled clipboard, but it was empty or could not be read.");
+      }
+    } catch (err) {
+      console.error("[PECS Extension] Firefox background DOM paste failed:", err);
+    }
+    return;
+  }
+
+  // Chrome MV3 uses Service Workers (no DOM). We must use offscreen API.
   try {
     await setupOffscreenDocument();
     
@@ -61,11 +86,11 @@ async function checkClipboard() {
       if (response && response.text) {
         processClipboardData(response.text);
       } else {
-        console.log("[PECS Extension] Polled clipboard, but it was empty or could not be read.");
+        console.log("[PECS Extension] Chrome polled clipboard, but it was empty or could not be read.");
       }
     });
   } catch (err) {
-    console.error("[PECS Extension] Failed to check clipboard", err);
+    console.error("[PECS Extension] Failed to check clipboard via offscreen API", err);
   }
 }
 
