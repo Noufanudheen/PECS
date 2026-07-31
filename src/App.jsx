@@ -8,7 +8,8 @@ import ClipboardPanel from './components/ClipboardPanel';
 import { sendFileChunks } from './lib/dataChannel';
 import { initializeOPFS, writeChunkToDisk, finalizeFile, autoDownloadFile, initializeIndexedDB, saveMetadata } from './lib/storage';
 import { startHeartbeat, handleHeartbeatMessage, stopHeartbeat, wipeLocalCache } from './lib/ephemerality';
-import { updateBackgroundPiPState, togglePictureInPicture, requestWakeLock, releaseWakeLock } from './lib/backgroundMode';
+import { updateBackgroundPiPState, togglePictureInPicture, requestWakeLock, releaseWakeLock, setupBackgroundKeepAlive } from './lib/backgroundMode';
+import { handleIncomingClipboardItem, flushPendingQueue, requestNotificationPermission } from './lib/mobileClipboard';
 
 export default function App() {
   const [roomCode, setRoomCode] = useState('');
@@ -109,7 +110,23 @@ export default function App() {
   const handleTogglePiP = async () => {
     const active = await togglePictureInPicture();
     setPipActive(active);
+    // When Background Mode is enabled, request notification permission for iOS queue alerts
+    if (active) {
+      setupBackgroundKeepAlive();
+      await requestNotificationPermission();
+    }
   };
+
+  // Flush queued clipboard items to system clipboard when app returns to foreground (mobile)
+  useEffect(() => {
+    const handleVisibility = async () => {
+      if (document.visibilityState === 'visible') {
+        await flushPendingQueue();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
 
   useEffect(() => {
     // Listen for UI reset from ephemerality wipe
@@ -276,25 +293,29 @@ export default function App() {
             return [parsed.item, ...prev].slice(0, 20);
           });
           
-          // Auto-copy clipboard logic
+          // Auto-copy clipboard logic (platform-aware)
           try {
-            if (document.hasFocus()) {
-              if (parsed.item.itemType === 'text') {
-                await navigator.clipboard.writeText(parsed.item.content);
-              } else if (parsed.item.itemType === 'image') {
-                const res = await fetch(parsed.item.content);
-                const blob = await res.blob();
-                let clipboardBlob = blob;
-                if (blob.type !== 'image/png') {
-                  const bmp = await createImageBitmap(blob);
-                  const canvas = document.createElement('canvas');
-                  canvas.width = bmp.width;
-                  canvas.height = bmp.height;
-                  const ctx = canvas.getContext('2d');
-                  ctx.drawImage(bmp, 0, 0);
-                  clipboardBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+            const handledByMobile = await handleIncomingClipboardItem(parsed.item);
+            if (!handledByMobile) {
+              // Desktop fallback: write only when tab is focused
+              if (document.hasFocus()) {
+                if (parsed.item.itemType === 'text') {
+                  await navigator.clipboard.writeText(parsed.item.content);
+                } else if (parsed.item.itemType === 'image') {
+                  const res = await fetch(parsed.item.content);
+                  const blob = await res.blob();
+                  let clipboardBlob = blob;
+                  if (blob.type !== 'image/png') {
+                    const bmp = await createImageBitmap(blob);
+                    const canvas = document.createElement('canvas');
+                    canvas.width = bmp.width;
+                    canvas.height = bmp.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(bmp, 0, 0);
+                    clipboardBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+                  }
+                  await navigator.clipboard.write([new ClipboardItem({ 'image/png': clipboardBlob })]);
                 }
-                await navigator.clipboard.write([new ClipboardItem({ 'image/png': clipboardBlob })]);
               }
             }
           } catch (e) {

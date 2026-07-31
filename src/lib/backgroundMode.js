@@ -80,10 +80,15 @@ export function setupBackgroundKeepAlive() {
   if (!videoEl) {
     videoEl = document.createElement('video');
     videoEl.autoplay = true;
-    videoEl.muted = true;
     videoEl.playsInline = true;
     videoEl.style.display = 'none';
     document.body.appendChild(videoEl);
+
+    // iOS Safari: muted=true tells iOS this isn't real media and PiP gets suspended.
+    // Instead, set near-zero volume so iOS treats it as an active media session.
+    const isIOS = /iPad|iPhone|iPod/i.test(navigator.userAgent);
+    videoEl.muted = !isIOS;
+    videoEl.volume = isIOS ? 0.001 : 1;
 
     // Capture canvas stream into video element
     if (canvasEl.captureStream) {
@@ -97,7 +102,10 @@ export function setupBackgroundKeepAlive() {
     });
   }
 
-  // Start silent Web Audio context to prevent audio hardware sleep & tab throttling
+  // Start audio context to prevent tab throttling.
+  // On Android: route through MediaStreamDestination so the OS registers an active
+  // audio session (same background exemption as music apps).
+  // On desktop: connect directly to destination as usual.
   try {
     if (!audioCtx && (window.AudioContext || window.webkitAudioContext)) {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -106,7 +114,19 @@ export function setupBackgroundKeepAlive() {
       const gain = audioCtx.createGain();
       gain.gain.value = 0.0001; // Silent / inaudible
       osc.connect(gain);
-      gain.connect(audioCtx.destination);
+
+      // Route to MediaStreamDestination for Android OS media session registration
+      const mediaStreamDest = audioCtx.createMediaStreamDestination();
+      gain.connect(mediaStreamDest);
+      gain.connect(audioCtx.destination); // Desktop keep-alive too
+
+      // Attach to a hidden <audio> element — this is what Android OS watches
+      const silentAudio = document.createElement('audio');
+      silentAudio.srcObject = mediaStreamDest.stream;
+      silentAudio.style.display = 'none';
+      document.body.appendChild(silentAudio);
+      silentAudio.play().catch(() => {});
+
       osc.start();
     } else if (audioCtx && audioCtx.state === 'suspended') {
       audioCtx.resume();
