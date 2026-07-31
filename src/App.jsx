@@ -9,7 +9,7 @@ import { sendFileChunks } from './lib/dataChannel';
 import { initializeOPFS, writeChunkToDisk, finalizeFile, autoDownloadFile, initializeIndexedDB, saveMetadata } from './lib/storage';
 import { startHeartbeat, handleHeartbeatMessage, stopHeartbeat, wipeLocalCache } from './lib/ephemerality';
 import { updateBackgroundPiPState, togglePictureInPicture, requestWakeLock, releaseWakeLock, setupBackgroundKeepAlive } from './lib/backgroundMode';
-import { handleIncomingClipboardItem, flushPendingQueue, requestNotificationPermission } from './lib/mobileClipboard';
+import { handleIncomingClipboardItem, flushPendingQueue, requestNotificationPermission, startForegroundPoller, stopForegroundPoller, isAndroid } from './lib/mobileClipboard';
 
 export default function App() {
   const [roomCode, setRoomCode] = useState('');
@@ -170,6 +170,19 @@ export default function App() {
       setStatus('disconnected');
     }
   }, [currentRoom]);
+
+  useEffect(() => {
+    if (status === 'connected' && isAndroid()) {
+      startForegroundPoller((text) => handleAddClipboardItem({
+        id: 'poller_' + Date.now().toString(36),
+        itemType: 'text',
+        content: text,
+        timestamp: Date.now()
+      }));
+    } else {
+      stopForegroundPoller();
+    }
+  }, [status, handleAddClipboardItem]);
 
   const handleDisconnection = useCallback((peerId = null) => {
     if (peerId) {
