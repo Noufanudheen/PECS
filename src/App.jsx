@@ -171,19 +171,6 @@ export default function App() {
     }
   }, [currentRoom]);
 
-  useEffect(() => {
-    if (status === 'connected' && isAndroid()) {
-      startForegroundPoller((text) => handleAddClipboardItem({
-        id: 'poller_' + Date.now().toString(36),
-        itemType: 'text',
-        content: text,
-        timestamp: Date.now()
-      }));
-    } else {
-      stopForegroundPoller();
-    }
-  }, [status, handleAddClipboardItem]);
-
   const handleDisconnection = useCallback((peerId = null) => {
     if (peerId) {
       console.log(`[WebRTC] Disconnecting peer: ${peerId}`);
@@ -240,6 +227,20 @@ export default function App() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    if (status === 'connected' && isAndroid()) {
+      startForegroundPoller((text) => handleAddClipboardItem({
+        id: 'poller_' + Date.now().toString(36),
+        itemType: 'text',
+        content: text,
+        timestamp: Date.now()
+      }));
+    } else {
+      stopForegroundPoller();
+    }
+  }, [status, handleAddClipboardItem]);
+
 
   useEffect(() => {
     // Listen for incoming auto-clipboard syncs from the browser extension content script
