@@ -1,4 +1,4 @@
-# Continuity P2P Bridge
+# P2P Ephemeral Clipboard Suite
 
 A browser-native application that enables direct, peer-to-peer data transfer across devices on the same network. The application facilitates the exchange of files, text, and clipboard data over an ephemeral WebRTC mesh network without relying on cloud storage or persistent accounts.
 
@@ -22,15 +22,3 @@ While the user interface provides standard chat and file drop zones, the applica
   - **iOS**: Queues incoming data silently while the browser is minimized and triggers an OS notification. Returning to the tab (or tapping the notification) automatically flushes the queue via an overlay intervention to comply with Safari's strict user-gesture requirements.
 - **Strict Ephemerality**: A 5-second ping/pong heartbeat monitors connection liveness. Upon disconnection, all local cache, IndexedDB metadata, and OPFS storage directories are immediately wiped.
 
-## Development Setup
-
-The application consists of a Vite-powered React frontend and a Node.js/Express Socket.io signaling server. 
-
-```bash
-npm install
-npm run dev
-```
-
-Navigate to `http://localhost:3000` on two devices connected to the same network and enter the same room code to initiate the handshake.
-
-*Note: The Web Crypto API requires a secure context. When testing locally over a standard HTTP LAN IP address, the application automatically falls back to an XOR cipher for signaling payloads. Production environments must run over HTTPS.*
