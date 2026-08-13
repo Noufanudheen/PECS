@@ -1,50 +1,36 @@
-# PECS — P2P Ephemeral Continuity Suite
+# Continuity P2P Bridge
 
-Browser-to-browser file transfer and chat over WebRTC. No accounts, no cloud storage, no data retention.
+A browser-native application that enables direct, peer-to-peer data transfer across devices on the same network. The application facilitates the exchange of files, text, and clipboard data over an ephemeral WebRTC mesh network without relying on cloud storage or persistent accounts.
 
-## How it works
+## Core Functions
 
-- Devices share a room code to establish a direct WebRTC connection via a lightweight signaling server
-- All payloads are AES-GCM encrypted end-to-end; the server never sees plaintext
-- Files are streamed in chunks and written to OPFS or memory, then auto-downloaded on the receiving end
-- Chat messages travel over the same encrypted data channel
+- **Direct File Transfer**: Stream files directly between devices using WebRTC Data Channels, with chunks written to the Origin Private File System (OPFS) and auto-downloaded upon completion.
+- **Session Clipboard**: A synchronized, real-time clipboard that supports text snippets and image data. Maintains a FIFO limit of 20 items.
+- **Chat Interface**: Exchange ephemeral text messages within the active session.
+- **Secure Pairing**: Devices pair using a shared room code. 
 
-## Stack
+## Under the Hood Features
 
-- **Frontend** — React, TypeScript, Vite, Tailwind CSS
-- **Signaling server** — Node.js, Express, Socket.io
-- **P2P transport** — WebRTC (`RTCPeerConnection` + `RTCDataChannel`)
-- **Storage** — OPFS (Origin Private File System) with IndexedDB metadata
+While the user interface provides standard chat and file drop zones, the application implements several advanced background systems to ensure stability and cross-platform continuity:
 
-## Run locally
+- **End-to-End Encryption**: All data transmitted over the WebRTC channel is encrypted using 256-bit AES-GCM. The signaling server handles only the initial handshake and routes encrypted payloads; it never has access to the plaintext data or encryption keys.
+- **Mesh Networking & LAN Isolation**: Supports up to 11 concurrent devices. A strict Local Area Network (LAN) mode operates without STUN servers to guarantee absolute network isolation, while an optional WAN mode utilizes NAT hole-punching for cross-network (e.g., 4G to Wi-Fi) connections.
+- **Background Execution Persistence**: Prevents mobile and desktop browsers from suspending JavaScript execution when the tab is backgrounded. This is achieved via a Picture-in-Picture (PiP) canvas stream on iOS/Desktop and a silent MediaStreamDestination audio session on Android.
+- **Platform-Aware Clipboard Synchronization**:
+  - **Desktop**: Features a global document listener for instant pasting and a dedicated browser extension (Manifest V3) that polls the system clipboard via offscreen documents to bypass Service Worker restrictions.
+  - **Android**: Uses an active foreground polling loop to automatically detect and broadcast new clipboard items.
+  - **iOS**: Queues incoming data silently while the browser is minimized and triggers an OS notification. Returning to the tab (or tapping the notification) automatically flushes the queue via an overlay intervention to comply with Safari's strict user-gesture requirements.
+- **Strict Ephemerality**: A 5-second ping/pong heartbeat monitors connection liveness. Upon disconnection, all local cache, IndexedDB metadata, and OPFS storage directories are immediately wiped.
+
+## Development Setup
+
+The application consists of a Vite-powered React frontend and a Node.js/Express Socket.io signaling server. 
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open `http://localhost:3000` on two devices on the same network. Enter the same room code on both and connect.
+Navigate to `http://localhost:3000` on two devices connected to the same network and enter the same room code to initiate the handshake.
 
-> The LAN IP (`http://192.168.x.x:3000`) does not support `crypto.subtle` (non-secure context). The app falls back to an XOR cipher for signaling in that case; use `localhost` or HTTPS for production.
-
-## Project structure
-
-```
-src/
-  App.tsx                  # Main app, signaling logic, state
-  components/
-    ChatPanel.tsx          # Chat UI
-    DragDropZone.tsx       # File drop target
-  lib/
-    crypto.ts              # Key derivation, encrypt/decrypt
-    dataChannel.ts         # Chunked file sending
-    ephemerality.ts        # Heartbeat, session wipe
-    storage.ts             # OPFS write, auto-download
-server.ts                  # Signaling server (Socket.io)
-```
-
-## Notes
-
-- Room codes starting with `dev-` bypass AES-GCM and use the XOR fallback (for LAN testing without HTTPS)
-- No data is stored on the server; the signaling server only relays encrypted blobs
-- Files are auto-downloaded on the receiving device when the transfer completes
+*Note: The Web Crypto API requires a secure context. When testing locally over a standard HTTP LAN IP address, the application automatically falls back to an XOR cipher for signaling payloads. Production environments must run over HTTPS.*
