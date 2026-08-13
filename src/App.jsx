@@ -8,7 +8,7 @@ import ClipboardPanel from './components/ClipboardPanel';
 import { sendFileChunks } from './lib/dataChannel';
 import { initializeOPFS, writeChunkToDisk, finalizeFile, autoDownloadFile, initializeIndexedDB, saveMetadata } from './lib/storage';
 import { startHeartbeat, handleHeartbeatMessage, stopHeartbeat, wipeLocalCache } from './lib/ephemerality';
-import { updateBackgroundPiPState, togglePictureInPicture, requestWakeLock, releaseWakeLock, setupBackgroundKeepAlive } from './lib/backgroundMode';
+import { updateBackgroundPiPState, togglePictureInPicture, requestWakeLock, releaseWakeLock, setupBackgroundKeepAlive, initMobileBackgroundSound } from './lib/backgroundMode';
 import { handleIncomingClipboardItem, flushPendingQueue, requestNotificationPermission, startForegroundPoller, stopForegroundPoller, isAndroid } from './lib/mobileClipboard';
 
 export default function App() {
@@ -133,6 +133,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // Initialize mobile background audio to prevent suspension
+    initMobileBackgroundSound();
+    
     // Listen for UI reset from ephemerality wipe
     const handleMessage = (e) => {
       if (e.data?.type === 'UI_STATE_RESET') {

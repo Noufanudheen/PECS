@@ -203,3 +203,29 @@ export function releaseWakeLock() {
     wakeLock = null;
   }
 }
+
+/**
+ * Attaches a one-time user interaction listener to start the background keep-alive
+ * specifically for mobile devices to prevent aggressive background suspension.
+ */
+export function initMobileBackgroundSound() {
+  if (typeof document === 'undefined') return;
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  if (!isMobile) return;
+
+  const unlockAudio = () => {
+    setupBackgroundKeepAlive();
+    // Check if the context was successfully created and running
+    if (audioCtx && audioCtx.state === 'running') {
+      document.removeEventListener('touchstart', unlockAudio, true);
+      document.removeEventListener('click', unlockAudio, true);
+      document.removeEventListener('touchend', unlockAudio, true);
+      console.log('[BackgroundMode] Mobile background audio unlocked');
+    }
+  };
+
+  document.addEventListener('touchstart', unlockAudio, true);
+  document.addEventListener('click', unlockAudio, true);
+  document.addEventListener('touchend', unlockAudio, true);
+}
+
