@@ -5,7 +5,11 @@
 // iOS: queue items silently + notifications, flush on foreground return
 
 export const isAndroid = () => /Android/i.test(navigator.userAgent);
-export const isIOS = () => /iPad|iPhone|iPod/i.test(navigator.userAgent);
+export const isIOS = () => {
+  if (/iPad|iPhone|iPod/i.test(navigator.userAgent)) return true;
+  if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return true; // iPadOS 13+
+  return false;
+};
 
 // Pending queue for deferred clipboard writes (iOS + Android bg fallback)
 let pendingQueue = [];
@@ -142,20 +146,21 @@ export function stopForegroundPoller() {
 /**
  * Flushes the pending clipboard queue on return to foreground.
  * Called on visibilitychange to 'visible'.
+ * Returns true if all items were successfully written, false if any failed (needs user gesture).
  */
 export async function flushPendingQueue() {
-  if (!pendingQueue.length) return;
+  if (!pendingQueue.length) return true;
   const queue = [...pendingQueue];
-  pendingQueue = [];
   console.log(`[MobileClipboard] Flushing ${queue.length} queued item(s) to clipboard.`);
 
+  let successCount = 0;
   for (const item of queue) {
     try {
       if (item.itemType === 'text') {
         const wrote = isAndroid()
           ? await writeToAndroidClipboard(item.content)
           : await navigator.clipboard.writeText(item.content).then(() => true).catch(() => false);
-        if (!wrote) console.warn('[MobileClipboard] Flush: could not write item.');
+        if (!wrote) throw new Error('NotAllowedError');
       } else if (item.itemType === 'image') {
         const res = await fetch(item.content);
         const blob = await res.blob();
@@ -169,10 +174,16 @@ export async function flushPendingQueue() {
         }
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
       }
+      successCount++;
     } catch (e) {
-      console.warn('[MobileClipboard] Flush write failed:', e.message);
+      console.warn('[MobileClipboard] Flush write failed, likely needs user gesture:', e.message);
+      break; // Stop on first failure to keep the rest in queue
     }
   }
+
+  // Remove successfully written items from the queue
+  pendingQueue = pendingQueue.slice(successCount);
+  return pendingQueue.length === 0;
 }
 
 // ─────────────────────────────────────────────────
@@ -195,11 +206,17 @@ function _sendNotification(item) {
   const body = item.itemType === 'text'
     ? item.content.substring(0, 80) + (item.content.length > 80 ? '...' : '')
     : '📷 Image received — tap to copy';
-  new Notification('PECS — New Clipboard Item', {
+  const notification = new Notification('PECS — New Clipboard Item', {
     body,
     icon: '/assets/icon128.png',
     tag: 'pecs-clipboard',
     renotify: true
   });
+
+  notification.onclick = () => {
+    window.focus();
+    flushPendingQueue();
+    notification.close();
+  };
 }
 

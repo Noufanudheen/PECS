@@ -24,6 +24,7 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [clipboardItems, setClipboardItems] = useState([]);
   const [pipActive, setPipActive] = useState(false);
+  const [showIosSyncOverlay, setShowIosSyncOverlay] = useState(false);
   const [allowMultiNetwork, setAllowMultiNetwork] = useState(() => {
     return localStorage.getItem('pecs_allow_multi_network') === 'true';
   });
@@ -121,7 +122,10 @@ export default function App() {
   useEffect(() => {
     const handleVisibility = async () => {
       if (document.visibilityState === 'visible') {
-        await flushPendingQueue();
+        const success = await flushPendingQueue();
+        if (!success && isIOS()) {
+          setShowIosSyncOverlay(true);
+        }
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
@@ -860,6 +864,30 @@ export default function App() {
 
         </main>
       </div>
+
+      {/* iOS Safari 'Tap to Sync' Overlay Fallback */}
+      {showIosSyncOverlay && (
+        <div 
+          className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-md flex items-center justify-center cursor-pointer"
+          onClick={async () => {
+            const success = await flushPendingQueue();
+            if (success) setShowIosSyncOverlay(false);
+          }}
+        >
+          <div className="bg-zinc-900 border border-zinc-700 p-8 rounded-2xl shadow-2xl flex flex-col items-center max-w-sm mx-4 text-center">
+            <div className="w-16 h-16 bg-indigo-500/20 rounded-full flex items-center justify-center mb-6">
+              <Zap className="w-8 h-8 text-indigo-400" />
+            </div>
+            <h3 className="text-xl font-medium text-white mb-2">Tap to Sync</h3>
+            <p className="text-sm text-zinc-400">
+              Safari requires a tap to paste the items received while you were away.
+            </p>
+            <button className="mt-8 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-medium shadow-lg shadow-indigo-500/20 transition-all w-full">
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Clipboard, Copy, Check, Image as ImageIcon, FileText, Trash2, ArrowDown } from 'lucide-react';
 
 export default function ClipboardPanel({ items = [], onPasteItem, onClear, disabled = false }) {
@@ -97,7 +97,7 @@ export default function ClipboardPanel({ items = [], onPasteItem, onClear, disab
   };
 
   // Handle global paste events inside component
-  const handlePasteEvent = (e) => {
+  const handlePasteEvent = useCallback((e) => {
     if (disabled) return;
     const clipboardData = e.clipboardData;
     if (!clipboardData) return;
@@ -137,7 +137,14 @@ export default function ClipboardPanel({ items = [], onPasteItem, onClear, disab
       });
       e.preventDefault();
     }
-  };
+  }, [disabled, onPasteItem]);
+
+  useEffect(() => {
+    document.addEventListener('paste', handlePasteEvent);
+    return () => {
+      document.removeEventListener('paste', handlePasteEvent);
+    };
+  }, [handlePasteEvent]);
 
   // Helper to copy image to clipboard
   const handleCopyImage = async (id, dataUrl) => {
@@ -174,7 +181,6 @@ export default function ClipboardPanel({ items = [], onPasteItem, onClear, disab
     <div 
       className="bg-zinc-900/50 border border-zinc-800/50 rounded-2xl p-6 backdrop-blur-sm flex flex-col h-full" 
       style={{ minHeight: 520 }}
-      onPaste={handlePasteEvent}
       tabIndex={0}
       ref={pasteContainerRef}
     >
@@ -203,40 +209,40 @@ export default function ClipboardPanel({ items = [], onPasteItem, onClear, disab
       </div>
 
       {/* Action Bar: Paste Button */}
-      <div className="mb-4">
+      <div className="mb-4 flex gap-2">
         <button
           onClick={handleManualPaste}
           disabled={disabled}
-          className={`w-full py-3 px-4 rounded-xl font-medium text-sm flex items-center justify-center space-x-2 transition-all ${
+          className={`flex-1 py-3 px-4 rounded-xl font-medium text-sm flex items-center justify-center space-x-2 transition-all ${
             disabled
               ? 'bg-zinc-800/50 text-zinc-600 border border-zinc-800 cursor-not-allowed'
               : 'bg-indigo-600/90 hover:bg-indigo-500 text-white border border-indigo-500/30 shadow-lg shadow-indigo-500/10 active:scale-[0.99]'
           }`}
         >
           <Clipboard className="w-4 h-4" />
-          <span>Paste from Clipboard</span>
+          <span>Sync Clipboard</span>
         </button>
-
-        {/* Fallback Text Input */}
-        {showInput && !disabled && (
-          <form onSubmit={handleTextSubmit} className="mt-3 flex space-x-2">
-            <input
-              type="text"
-              value={textInput}
-              onChange={(e) => setTextInput(e.target.value)}
-              placeholder="Paste or type snippet to sync..."
-              className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500 font-mono"
-              autoFocus
-            />
-            <button
-              type="submit"
-              className="bg-zinc-800 hover:bg-zinc-700 text-white text-xs px-3 py-2 rounded-xl border border-zinc-700 font-medium"
-            >
-              Add
-            </button>
-          </form>
-        )}
       </div>
+      
+      {/* Fallback Text Input */}
+      {showInput && !disabled && (
+        <form onSubmit={handleTextSubmit} className="mb-4 flex space-x-2">
+          <input
+            type="text"
+            value={textInput}
+            onChange={(e) => setTextInput(e.target.value)}
+            placeholder="Paste or type snippet to sync..."
+            className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500 font-mono"
+            autoFocus
+          />
+          <button
+            type="submit"
+            className="bg-zinc-800 hover:bg-zinc-700 text-white text-xs px-3 py-2 rounded-xl border border-zinc-700 font-medium"
+          >
+            Add
+          </button>
+        </form>
+      )}
 
       {/* Clipboard Items Feed */}
       <div className="flex-1 overflow-y-auto pr-1 space-y-3 chat-scroll">

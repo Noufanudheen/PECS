@@ -81,7 +81,7 @@ export function setupBackgroundKeepAlive() {
     videoEl = document.createElement('video');
     videoEl.autoplay = true;
     videoEl.playsInline = true;
-    videoEl.style.display = 'none';
+    videoEl.style.cssText = 'position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px;';
     document.body.appendChild(videoEl);
 
     // iOS Safari: muted=true tells iOS this isn't real media and PiP gets suspended.
@@ -123,7 +123,7 @@ export function setupBackgroundKeepAlive() {
       // Attach to a hidden <audio> element — this is what Android OS watches
       const silentAudio = document.createElement('audio');
       silentAudio.srcObject = mediaStreamDest.stream;
-      silentAudio.style.display = 'none';
+      silentAudio.style.cssText = 'position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px;';
       document.body.appendChild(silentAudio);
       silentAudio.play().catch(() => {});
 
