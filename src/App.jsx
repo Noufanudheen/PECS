@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { deriveKey, encryptPayload, decryptPayload } from './lib/crypto';
-import { Shield, Key, Zap, Link2, HardDrive, Lock, Tv, Wifi, Globe } from 'lucide-react';
+import { Shield, Key, Zap, Link2, HardDrive, Lock, Tv, Wifi, Globe, CheckCircle } from 'lucide-react';
 import DragDropZone from './components/DragDropZone';
 import ChatPanel from './components/ChatPanel';
 import ClipboardPanel from './components/ClipboardPanel';
@@ -19,6 +19,14 @@ export default function App() {
   const [transferProgress, setTransferProgress] = useState(0);
   const [isTransferring, setIsTransferring] = useState(false);
   const [receivedFile, setReceivedFile] = useState(null);
+  const [sentFileSuccess, setSentFileSuccess] = useState(null);
+
+  const activeTransferRef = useRef({
+    fileId: null,
+    fileName: '',
+    pendingPeerIds: new Set(),
+    timeoutId: null
+  });
 
   // Chat, Clipboard & Network Sync state
   const [messages, setMessages] = useState([]);
@@ -171,6 +179,22 @@ export default function App() {
     }
   }, [currentRoom]);
 
+  const checkTransferACKComplete = useCallback(() => {
+    if (activeTransferRef.current.fileId && activeTransferRef.current.pendingPeerIds.size === 0) {
+      console.log('✅ [WebRTC] All recipients acknowledged file receipt!');
+      if (activeTransferRef.current.timeoutId) {
+        clearTimeout(activeTransferRef.current.timeoutId);
+      }
+      const completedFileName = activeTransferRef.current.fileName;
+      activeTransferRef.current = { fileId: null, fileName: '', pendingPeerIds: new Set(), timeoutId: null };
+      setTransferProgress(100);
+      setIsTransferring(false);
+      if (completedFileName) {
+        setSentFileSuccess({ name: completedFileName });
+      }
+    }
+  }, []);
+
   const handleDisconnection = useCallback((peerId = null) => {
     if (peerId) {
       console.log(`[WebRTC] Disconnecting peer: ${peerId}`);
@@ -183,9 +207,22 @@ export default function App() {
       dataChannelsRef.current.delete(peerId);
       
       pendingCandidatesRef.current.delete(peerId);
+
+      if (activeTransferRef.current.fileId) {
+        activeTransferRef.current.pendingPeerIds.delete(peerId);
+        checkTransferACKComplete();
+      }
+
       updateConnectionStatus();
     } else {
       console.log(`[WebRTC] Disconnecting all peers`);
+      if (activeTransferRef.current.timeoutId) {
+        clearTimeout(activeTransferRef.current.timeoutId);
+      }
+      activeTransferRef.current = { fileId: null, fileName: '', pendingPeerIds: new Set(), timeoutId: null };
+      setIsTransferring(false);
+      setTransferProgress(0);
+      setSentFileSuccess(null);
       peersRef.current.forEach(pc => pc.close());
       peersRef.current.clear();
       dataChannelsRef.current.forEach(dc => stopHeartbeat(dc));
@@ -195,7 +232,7 @@ export default function App() {
       wipeLocalCache();
       updateConnectionStatus(null);
     }
-  }, [updateConnectionStatus]);
+  }, [updateConnectionStatus, checkTransferACKComplete]);
 
   const addMessage = useCallback((msg) => {
     setMessages(prev => [...prev, msg]);
@@ -349,6 +386,18 @@ export default function App() {
           setIsTransferring(false);
           setTransferProgress(100);
           setReceivedFile({ name: parsed.fileName || parsed.fileId, id: parsed.fileId });
+
+          // Send ACK back to sender confirming full receipt & finalization
+          channel.send(JSON.stringify({
+            type: 'FILE_ACK',
+            fileId: parsed.fileId || parsed.fileName
+          }));
+        } else if (parsed.type === 'FILE_ACK') {
+          console.log(`📥 [WebRTC] Received FILE_ACK for ${parsed.fileId} from peer ${peerId}`);
+          if (activeTransferRef.current.fileId === parsed.fileId) {
+            activeTransferRef.current.pendingPeerIds.delete(peerId);
+            checkTransferACKComplete();
+          }
         }
       } else if (event.data instanceof ArrayBuffer) {
         await writeChunkToDisk(event.data);
@@ -588,14 +637,16 @@ export default function App() {
   // ==========================================
 
   const handleFileSelect = (file) => {
-    let hasOpenChannel = false;
-    dataChannelsRef.current.forEach(channel => {
-      if (channel.readyState === 'open') hasOpenChannel = true;
+    if (!file) return;
+
+    const openChannels = [];
+    dataChannelsRef.current.forEach((channel, peerId) => {
+      if (channel.readyState === 'open') {
+        openChannels.push({ peerId, channel });
+      }
     });
-    if (!hasOpenChannel) return;
-    
-    setIsTransferring(true);
-    setTransferProgress(0);
+
+    if (openChannels.length === 0) return;
 
     const uuid = typeof crypto !== 'undefined' && crypto.randomUUID 
       ? crypto.randomUUID() 
@@ -609,17 +660,43 @@ export default function App() {
       mimeType: file.type
     });
 
-    dataChannelsRef.current.forEach(channel => {
-      if (channel.readyState === 'open') {
-        channel.send(metadataPayload);
-        sendFileChunks(file, channel, (progress) => {
-          setTransferProgress(progress);
-          if (progress >= 100) {
-            setIsTransferring(false);
-          }
-        });
-      }
+    if (activeTransferRef.current.timeoutId) {
+      clearTimeout(activeTransferRef.current.timeoutId);
+    }
+
+    const pendingPeerIds = new Set(openChannels.map(c => c.peerId));
+    activeTransferRef.current = {
+      fileId: uuid,
+      fileName: file.name,
+      pendingPeerIds,
+      timeoutId: null
+    };
+
+    setSentFileSuccess(null);
+    setReceivedFile(null);
+    setIsTransferring(true);
+    setTransferProgress(0);
+
+    openChannels.forEach(({ channel }) => {
+      channel.send(metadataPayload);
+      sendFileChunks(file, channel, (progress) => {
+        setTransferProgress(progress);
+      }, uuid);
     });
+
+    // Safety fallback timeout (45s) in case a recipient hangs
+    activeTransferRef.current.timeoutId = setTimeout(() => {
+      if (activeTransferRef.current.fileId === uuid) {
+        console.log('⏰ [WebRTC] Transfer ACK safety timeout reached.');
+        const completedFileName = activeTransferRef.current.fileName;
+        activeTransferRef.current = { fileId: null, fileName: '', pendingPeerIds: new Set(), timeoutId: null };
+        setTransferProgress(100);
+        setIsTransferring(false);
+        if (completedFileName) {
+          setSentFileSuccess({ name: completedFileName });
+        }
+      }
+    }, 45000);
   };
 
   const handleSendChat = useCallback((text) => {
@@ -822,7 +899,11 @@ export default function App() {
                   {isTransferring && (
                     <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
                       <div className="flex justify-between text-xs text-zinc-400 mb-2">
-                        <span>Transferring…</span>
+                        <span>
+                          {transferProgress >= 99 && activeTransferRef.current.fileId
+                            ? 'Awaiting peer acknowledgement…'
+                            : 'Transferring…'}
+                        </span>
                         <span>{Math.round(transferProgress)}%</span>
                       </div>
                       <div className="w-full bg-zinc-800 rounded-full h-1.5">
@@ -830,6 +911,16 @@ export default function App() {
                           className="bg-indigo-500 h-1.5 rounded-full transition-all duration-300"
                           style={{ width: `${transferProgress}%` }}
                         />
+                      </div>
+                    </div>
+                  )}
+
+                  {sentFileSuccess && !isTransferring && (
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex items-center space-x-3 text-emerald-400 text-sm">
+                      <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="font-medium">File sent &amp; acknowledged by peers</p>
+                        <p className="text-emerald-400/70 text-xs truncate mt-0.5">{sentFileSuccess.name}</p>
                       </div>
                     </div>
                   )}
