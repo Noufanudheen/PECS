@@ -78,19 +78,12 @@ export default function App() {
   const [connectedPeersCount, setConnectedPeersCount] = useState(0);
 
   const getRTCConfiguration = useCallback(() => {
-    if (allowMultiNetworkRef.current) {
-      return {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
-        ],
-        iceCandidatePoolSize: 10,
-      };
-    }
-    // Strict LAN Mode: Zero STUN servers for local-only network isolation
     return {
-      iceServers: [],
-      iceCandidatePoolSize: 5,
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ],
+      iceCandidatePoolSize: allowMultiNetworkRef.current ? 10 : 5,
     };
   }, []);
 
@@ -380,8 +373,8 @@ export default function App() {
       if (event.candidate && cryptoKeyRef.current) {
         const candStr = event.candidate.candidate || '';
         // In Strict LAN mode (allowMultiNetwork === false), filter out non-LAN candidates
-        if (!allowMultiNetworkRef.current && (candStr.includes('typ srflx') || candStr.includes('typ relay'))) {
-          console.log(`🔒 [WebRTC] Strict LAN Mode: Suppressing non-LAN candidate for ${peerId}:`, candStr);
+        if (!allowMultiNetworkRef.current && candStr.includes('typ relay')) {
+          console.log(`🔒 [WebRTC] Strict LAN Mode: Suppressing relay candidate for ${peerId}:`, candStr);
           return;
         }
 
@@ -507,7 +500,7 @@ export default function App() {
             for (const candidate of queued) {
               try {
                 const candStr = candidate?.candidate || '';
-                if (!allowMultiNetworkRef.current && (candStr.includes('typ srflx') || candStr.includes('typ relay'))) {
+                if (!allowMultiNetworkRef.current && candStr.includes('typ relay')) {
                   continue;
                 }
                 await pc.addIceCandidate(new RTCIceCandidate(candidate));
@@ -537,7 +530,7 @@ export default function App() {
             for (const candidate of queued) {
               try {
                 const candStr = candidate?.candidate || '';
-                if (!allowMultiNetworkRef.current && (candStr.includes('typ srflx') || candStr.includes('typ relay'))) {
+                if (!allowMultiNetworkRef.current && candStr.includes('typ relay')) {
                   continue;
                 }
                 await pc.addIceCandidate(new RTCIceCandidate(candidate));
@@ -548,10 +541,10 @@ export default function App() {
             pendingCandidatesRef.current.set(senderId, []);
           } else if (payload.type === 'ice-candidate') {
             const candStr = payload.candidate?.candidate || '';
-            if (!allowMultiNetworkRef.current && (candStr.includes('typ srflx') || candStr.includes('typ relay'))) {
-              console.log(`🔒 [WebRTC] Strict LAN Mode: Suppressing remote non-LAN candidate from ${senderId}`);
+            if (!allowMultiNetworkRef.current && candStr.includes('typ relay')) {
+              console.log(`🔒 [WebRTC] Strict LAN Mode: Suppressing remote relay candidate from ${senderId}`);
             } else {
-              if (pc.remoteDescription) {
+              if (pc.remoteDescription && pc.remoteDescription.type) {
                 await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
               } else {
                 console.log(`⚙️ [WebRTC] Queueing ICE candidate for ${senderId}...`);

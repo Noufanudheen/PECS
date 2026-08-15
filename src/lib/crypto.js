@@ -1,7 +1,9 @@
 const isSubtleSupported = typeof window !== 'undefined' && !!(window.crypto && window.crypto.subtle);
 
 export async function deriveKey(roomCode) {
-  const forceFallback = roomCode.startsWith('dev-') || roomCode.includes('fallback');
+  const isHTTP = typeof window !== 'undefined' && window.location && window.location.protocol === 'http:';
+  const forceFallback = roomCode.startsWith('dev-') || roomCode.includes('fallback') || isHTTP;
+
   if (isSubtleSupported && !forceFallback) {
     const encoder = new TextEncoder();
     const keyMaterial = await window.crypto.subtle.importKey(
@@ -105,11 +107,15 @@ export async function decryptPayload(cryptoKey, encryptedData) {
     return JSON.parse(jsonStr);
   }
   
-  // If sender sent standard array but receiver is fallback
+  // If sender sent standard array (unencrypted JSON or plaintext string)
   if (encryptedData.ciphertext) {
-    const decoder = new TextDecoder();
-    const str = decoder.decode(new Uint8Array(encryptedData.ciphertext));
-    return JSON.parse(str);
+    try {
+      const decoder = new TextDecoder();
+      const str = decoder.decode(new Uint8Array(encryptedData.ciphertext));
+      return JSON.parse(str);
+    } catch (e) {
+      console.warn("Could not parse plaintext ciphertext array, fallback cipher attempt:", e);
+    }
   }
 
   throw new Error("Unable to decrypt payload");
