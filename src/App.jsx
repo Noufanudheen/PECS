@@ -95,6 +95,11 @@ export default function App() {
     };
   }, []);
 
+  // Initialize mobile background audio listener on mount
+  useEffect(() => {
+    initMobileBackgroundSound();
+  }, []);
+
   // Sync state with Picture-in-Picture dynamic stream HUD
   useEffect(() => {
     updateBackgroundPiPState(status, transferProgress, currentRoom, isTransferring);
