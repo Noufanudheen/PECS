@@ -99,6 +99,19 @@ export default function ClipboardPanel({ items = [], onPasteItem, onClear, disab
   // Handle global paste events inside component
   const handlePasteEvent = useCallback((e) => {
     if (disabled) return;
+
+    // Ignore global paste handler when user is focused in a text field, input, textarea or chat box
+    const target = e.target;
+    if (
+      target &&
+      (target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable ||
+        target.closest('input, textarea, [contenteditable="true"]'))
+    ) {
+      return;
+    }
+
     const clipboardData = e.clipboardData;
     if (!clipboardData) return;
 
