@@ -5,8 +5,8 @@ import { Shield, Key, Zap, Link2, HardDrive, Lock, Tv, Wifi, Globe, CheckCircle 
 import DragDropZone from './components/DragDropZone';
 import ChatPanel from './components/ChatPanel';
 import ClipboardPanel from './components/ClipboardPanel';
-import { sendFileChunks } from './lib/dataChannel';
-import { initializeOPFS, writeChunkToDisk, finalizeFile, autoDownloadFile, initializeIndexedDB, saveMetadata } from './lib/storage';
+import { sendFileChunks, computeFileChecksum } from './lib/dataChannel';
+import { initializeOPFS, writeChunkToDisk, finalizeFile, autoDownloadFile, verifyChecksum, initializeIndexedDB, saveMetadata } from './lib/storage';
 import { startHeartbeat, handleHeartbeatMessage, stopHeartbeat, wipeLocalCache } from './lib/ephemerality';
 import { updateBackgroundPiPState, togglePictureInPicture, requestWakeLock, releaseWakeLock, setupBackgroundKeepAlive, initMobileBackgroundSound } from './lib/backgroundMode';
 import { handleIncomingClipboardItem, flushPendingQueue, requestNotificationPermission, startForegroundPoller, stopForegroundPoller, isAndroid } from './lib/mobileClipboard';
@@ -303,7 +303,9 @@ export default function App() {
   const setupDataChannel = useCallback((peerId, channel) => {
     dataChannelsRef.current.set(peerId, channel);
     channel.binaryType = "arraybuffer";
-    channel.bufferedAmountLowThreshold = 65536;
+    // 1 MB threshold — lets the browser queue ~64 × 16 KB chunks before
+    // the backpressure guard pauses the sender, maximising single-stream throughput.
+    channel.bufferedAmountLowThreshold = 1048576;
 
     const handleOpen = () => {
       if (channel !== dataChannelsRef.current.get(peerId)) return;
@@ -387,16 +389,49 @@ export default function App() {
           }
         } else if (parsed.type === 'EOF') {
           await finalizeFile();
+
+          // ── Checksum verification ────────────────────────────────────────
+          const checksumResult = await verifyChecksum(parsed.checksum || null);
+          if (!checksumResult.ok && parsed.checksum) {
+            console.error(
+              `❌ [Transfer] Checksum MISMATCH for ${parsed.fileName}.`,
+              `Expected: ${checksumResult.expected}`,
+              `Got:      ${checksumResult.actual}`
+            );
+            setIsTransferring(false);
+            setTransferProgress(0);
+            // Notify sender of failure
+            channel.send(JSON.stringify({
+              type: 'FILE_CHECKSUM_FAIL',
+              fileId: parsed.fileId || parsed.fileName,
+              expected: checksumResult.expected,
+              actual: checksumResult.actual,
+            }));
+            return;
+          }
+          // ────────────────────────────────────────────────────────────────
+
           await autoDownloadFile();
           setIsTransferring(false);
           setTransferProgress(100);
           setReceivedFile({ name: parsed.fileName || parsed.fileId, id: parsed.fileId });
 
-          // Send ACK back to sender confirming full receipt & finalization
+          // ACK sender only after successful verification + download trigger
           channel.send(JSON.stringify({
             type: 'FILE_ACK',
-            fileId: parsed.fileId || parsed.fileName
+            fileId: parsed.fileId || parsed.fileName,
+            verified: true,
           }));
+        } else if (parsed.type === 'FILE_CHECKSUM_FAIL') {
+          console.error(
+            `❌ [Transfer] Peer ${peerId} reported checksum FAIL for ${parsed.fileId}.`,
+            `Their hash: ${parsed.actual}`
+          );
+          // Mark transfer as failed on sender side
+          if (activeTransferRef.current.fileId === parsed.fileId) {
+            activeTransferRef.current.pendingPeerIds.delete(peerId);
+            // Don't call checkTransferACKComplete — leave at 99% to signal the issue
+          }
         } else if (parsed.type === 'FILE_ACK') {
           console.log(`📥 [WebRTC] Received FILE_ACK for ${parsed.fileId} from peer ${peerId}`);
           if (activeTransferRef.current.fileId === parsed.fileId) {
@@ -682,12 +717,28 @@ export default function App() {
     setIsTransferring(true);
     setTransferProgress(0);
 
-    openChannels.forEach(({ channel }) => {
-      channel.send(metadataPayload);
-      sendFileChunks(file, channel, (progress) => {
-        setTransferProgress(progress);
-      }, uuid);
-    });
+    // Compute SHA-256 checksum before streaming — runs once on the file buffer.
+    // The checksum is passed to sendFileChunks and included in the EOF message
+    // so receivers can verify integrity before saving.
+    computeFileChecksum(file)
+      .then(checksum => {
+        openChannels.forEach(({ channel }) => {
+          channel.send(metadataPayload);
+          sendFileChunks(file, channel, (progress) => {
+            setTransferProgress(progress);
+          }, uuid, checksum);
+        });
+      })
+      .catch(err => {
+        // Fallback: send without checksum if crypto.subtle is unavailable
+        console.warn('[Transfer] Could not compute checksum, proceeding without it:', err);
+        openChannels.forEach(({ channel }) => {
+          channel.send(metadataPayload);
+          sendFileChunks(file, channel, (progress) => {
+            setTransferProgress(progress);
+          }, uuid, null);
+        });
+      });
 
     // Safety fallback timeout (45s) in case a recipient hangs
     activeTransferRef.current.timeoutId = setTimeout(() => {
