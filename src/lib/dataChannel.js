@@ -1,108 +1,89 @@
-export const CHUNK_SIZE = 16 * 1024; // 16 KB per chunk
+export const CHUNK_SIZE = 64 * 1024; // 64 KB — 4× fewer sends vs 16 KB
 
-// How many chunks to queue ahead before checking backpressure.
-// At 16 KB each, 64 chunks = 1 MB of pre-queued data in flight.
-const BATCH_SIZE = 64;
+// Must match channel.bufferedAmountLowThreshold set in App.jsx (1 MB).
+const HIGH_WATER_MARK = 1048576;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Checksum
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Compute a SHA-256 hex digest of a File/Blob using the Web Crypto API.
- * Returned as a lowercase hex string.
+ * SHA-256 a pre-loaded ArrayBuffer. Returns a lowercase hex string.
+ * Accepts either an ArrayBuffer (fast path) or a File/Blob.
  */
-export async function computeFileChecksum(file) {
-  const buffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-  return Array.from(new Uint8Array(hashBuffer))
+export async function computeFileChecksum(fileOrBuffer) {
+  const buf =
+    fileOrBuffer instanceof ArrayBuffer
+      ? fileOrBuffer
+      : await fileOrBuffer.arrayBuffer();
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(hash))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// High-throughput sender
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * High-throughput file sender.
+ * Maximum-throughput file sender.
  *
- * Strategy:
- *  - Batches up to BATCH_SIZE chunks before yielding to the backpressure guard.
- *  - Only pauses when bufferedAmount > bufferedAmountLowThreshold (1 MB).
- *  - Uses FileReader slices so we never load the whole file into memory.
- *  - Sends an EOF message with the pre-computed SHA-256 checksum so receivers
- *    can verify integrity before saving.
+ * Key decisions:
+ *  1. Read the whole file into an ArrayBuffer once — no per-chunk FileReader.
+ *  2. Inner while-loop: keep pumping 64 KB slices as long as the DataChannel
+ *     send buffer has room (< HIGH_WATER_MARK). ArrayBuffer.slice() is O(1).
+ *  3. Outer await: only suspend when the buffer is truly full, resuming via
+ *     the bufferedamountlow event (no polling, no setTimeout).
+ *  4. Checksum is accepted externally so the caller can compute it from the
+ *     same pre-loaded buffer — zero duplicate file reads.
  *
- * @param {File}     file        File to send.
- * @param {RTCDataChannel} channel  Open DataChannel.
- * @param {function} onProgress  Called with 0–99 during send.
- * @param {string}   fileId      Unique transfer ID.
- * @param {string}   checksum    Pre-computed SHA-256 hex of the file (from computeFileChecksum).
+ * @param {File|Blob}       file        Source file.
+ * @param {RTCDataChannel}  channel     Open DataChannel (binaryType='arraybuffer').
+ * @param {function}        onProgress  Called with 0–99 during send.
+ * @param {string}          fileId      Unique transfer ID.
+ * @param {string|null}     checksum    Pre-computed SHA-256 hex (or null).
  */
-export function sendFileChunks(file, channel, onProgress, fileId, checksum) {
-  let offset = 0;
-  let chunksInBatch = 0;
+export async function sendFileChunks(file, channel, onProgress, fileId, checksum) {
   const actualFileId = fileId || file.name;
 
-  const sendNextChunk = () => {
-    if (offset >= file.size) {
-      // All chunks sent — emit EOF with checksum
-      channel.send(JSON.stringify({
-        type: 'EOF',
-        fileId: actualFileId,
-        fileName: file.name,
-        checksum: checksum || null,
-      }));
-      return;
+  // Single read — all subsequent work is synchronous buffer slicing
+  const buffer = await file.arrayBuffer();
+  const total = buffer.byteLength;
+  let offset = 0;
+
+  while (offset < total) {
+    // ── Backpressure gate ──────────────────────────────────────────────────
+    // If the channel's send queue is at or above the high-water mark, park
+    // here until the browser fires bufferedamountlow (threshold = 1 MB).
+    if (channel.bufferedAmount >= HIGH_WATER_MARK) {
+      await new Promise(resolve => {
+        channel.onbufferedamountlow = () => {
+          channel.onbufferedamountlow = null;
+          resolve();
+        };
+      });
     }
 
-    // Backpressure gate — pause if the send buffer is full
-    if (channel.bufferedAmount > channel.bufferedAmountLowThreshold) {
-      channel.onbufferedamountlow = () => {
-        channel.onbufferedamountlow = null;
-        chunksInBatch = 0;
-        sendNextChunk();
-      };
-      return;
-    }
-
-    const slice = file.slice(offset, offset + CHUNK_SIZE);
-    const reader = new FileReader();
-
-    reader.onload = (e) => {
-      if (!e.target?.result) return;
-
-      channel.send(e.target.result);
-      offset += slice.size;
-      chunksInBatch++;
+    // ── Inner pump: fill the buffer greedily ──────────────────────────────
+    // Keep sending until the queue is full again. Each `.slice()` is O(1)
+    // (no data copy — returns a new ArrayBuffer view into the same memory).
+    while (offset < total && channel.bufferedAmount < HIGH_WATER_MARK) {
+      const end = Math.min(offset + CHUNK_SIZE, total);
+      channel.send(buffer.slice(offset, end));
+      offset = end;
 
       if (onProgress) {
-        onProgress(Math.min(99, (offset / file.size) * 100));
+        onProgress(Math.min(99, (offset / total) * 100));
       }
+    }
+  }
 
-      if (offset >= file.size) {
-        // Done — send EOF
-        channel.send(JSON.stringify({
-          type: 'EOF',
-          fileId: actualFileId,
-          fileName: file.name,
-          checksum: checksum || null,
-        }));
-        return;
-      }
-
-      // Yield to backpressure guard every BATCH_SIZE chunks
-      if (chunksInBatch >= BATCH_SIZE) {
-        chunksInBatch = 0;
-        if (channel.bufferedAmount > channel.bufferedAmountLowThreshold) {
-          channel.onbufferedamountlow = () => {
-            channel.onbufferedamountlow = null;
-            sendNextChunk();
-          };
-        } else {
-          // Use a microtask-yield to keep the event loop responsive
-          queueMicrotask(sendNextChunk);
-        }
-      } else {
-        sendNextChunk();
-      }
-    };
-
-    reader.readAsArrayBuffer(slice);
-  };
-
-  sendNextChunk();
+  // ── EOF ──────────────────────────────────────────────────────────────────
+  channel.send(JSON.stringify({
+    type: 'EOF',
+    fileId: actualFileId,
+    fileName: file.name,
+    checksum: checksum ?? null,
+  }));
 }

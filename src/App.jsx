@@ -717,28 +717,37 @@ export default function App() {
     setIsTransferring(true);
     setTransferProgress(0);
 
-    // Compute SHA-256 checksum before streaming — runs once on the file buffer.
-    // The checksum is passed to sendFileChunks and included in the EOF message
-    // so receivers can verify integrity before saving.
-    computeFileChecksum(file)
-      .then(checksum => {
+    // ── Read the file into memory ONCE ────────────────────────────────────
+    // The same ArrayBuffer is used for SHA-256 hashing AND for sending,
+    // so the OS only reads the file from disk a single time.
+    file.arrayBuffer()
+      .then(async (buffer) => {
+        // Checksum computed from the already-loaded buffer — no second read
+        let checksum = null;
+        try {
+          checksum = await computeFileChecksum(buffer);
+        } catch (err) {
+          console.warn('[Transfer] Checksum computation failed, sending without it:', err);
+        }
+
         openChannels.forEach(({ channel }) => {
           channel.send(metadataPayload);
-          sendFileChunks(file, channel, (progress) => {
-            setTransferProgress(progress);
-          }, uuid, checksum);
+          // sendFileChunks receives a Blob wrapping the pre-loaded buffer so
+          // its internal file.arrayBuffer() call is instant (cached memory).
+          sendFileChunks(
+            new Blob([buffer], { type: file.type }),
+            channel,
+            (progress) => setTransferProgress(progress),
+            uuid,
+            checksum,
+          );
         });
       })
       .catch(err => {
-        // Fallback: send without checksum if crypto.subtle is unavailable
-        console.warn('[Transfer] Could not compute checksum, proceeding without it:', err);
-        openChannels.forEach(({ channel }) => {
-          channel.send(metadataPayload);
-          sendFileChunks(file, channel, (progress) => {
-            setTransferProgress(progress);
-          }, uuid, null);
-        });
+        console.error('[Transfer] Failed to read file buffer:', err);
+        setIsTransferring(false);
       });
+
 
     // Safety fallback timeout (45s) in case a recipient hangs
     activeTransferRef.current.timeoutId = setTimeout(() => {
