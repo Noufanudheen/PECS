@@ -7,76 +7,58 @@ const HIGH_WATER_MARK = 1048576;
 // Checksum
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * SHA-256 a pre-loaded ArrayBuffer. Returns a lowercase hex string.
- * Accepts either an ArrayBuffer (fast path) or a File/Blob.
- */
-export async function computeFileChecksum(fileOrBuffer) {
-  const buf =
-    fileOrBuffer instanceof ArrayBuffer
-      ? fileOrBuffer
-      : await fileOrBuffer.arrayBuffer();
-  const hash = await crypto.subtle.digest('SHA-256', buf);
-  return Array.from(new Uint8Array(hash))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-}
+// Checksum computation removed to prioritize transfer speed.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // High-throughput sender
 // ─────────────────────────────────────────────────────────────────────────────
 
+const READ_BLOCK_SIZE = 2 * 1024 * 1024; // 2 MB
+
 /**
- * Maximum-throughput file sender.
- *
- * Key decisions:
- *  1. Read the whole file into an ArrayBuffer once — no per-chunk FileReader.
- *  2. Inner while-loop: keep pumping 64 KB slices as long as the DataChannel
- *     send buffer has room (< HIGH_WATER_MARK). ArrayBuffer.slice() is O(1).
- *  3. Outer await: only suspend when the buffer is truly full, resuming via
- *     the bufferedamountlow event (no polling, no setTimeout).
- *  4. Checksum is accepted externally so the caller can compute it from the
- *     same pre-loaded buffer — zero duplicate file reads.
+ * Maximum-throughput file sender with incremental memory reading.
  *
  * @param {File|Blob}       file        Source file.
  * @param {RTCDataChannel}  channel     Open DataChannel (binaryType='arraybuffer').
  * @param {function}        onProgress  Called with 0–99 during send.
  * @param {string}          fileId      Unique transfer ID.
- * @param {string|null}     checksum    Pre-computed SHA-256 hex (or null).
  */
-export async function sendFileChunks(file, channel, onProgress, fileId, checksum) {
+export async function sendFileChunks(file, channel, onProgress, fileId) {
   const actualFileId = fileId || file.name;
+  const total = file.size;
+  let fileOffset = 0;
 
-  // Single read — all subsequent work is synchronous buffer slicing
-  const buffer = await file.arrayBuffer();
-  const total = buffer.byteLength;
-  let offset = 0;
+  while (fileOffset < total) {
+    // Read a 2MB block from the file incrementally to save memory
+    const blockEnd = Math.min(fileOffset + READ_BLOCK_SIZE, total);
+    const blockBuffer = await file.slice(fileOffset, blockEnd).arrayBuffer();
+    const blockLength = blockBuffer.byteLength;
+    let blockOffset = 0;
 
-  while (offset < total) {
-    // ── Backpressure gate ──────────────────────────────────────────────────
-    // If the channel's send queue is at or above the high-water mark, park
-    // here until the browser fires bufferedamountlow (threshold = 1 MB).
-    if (channel.bufferedAmount >= HIGH_WATER_MARK) {
-      await new Promise(resolve => {
-        channel.onbufferedamountlow = () => {
-          channel.onbufferedamountlow = null;
-          resolve();
-        };
-      });
-    }
+    while (blockOffset < blockLength) {
+      // ── Backpressure gate ──────────────────────────────────────────────────
+      if (channel.bufferedAmount >= HIGH_WATER_MARK) {
+        await new Promise(resolve => {
+          channel.onbufferedamountlow = () => {
+            channel.onbufferedamountlow = null;
+            resolve();
+          };
+        });
+      }
 
-    // ── Inner pump: fill the buffer greedily ──────────────────────────────
-    // Keep sending until the queue is full again. Each `.slice()` is O(1)
-    // (no data copy — returns a new ArrayBuffer view into the same memory).
-    while (offset < total && channel.bufferedAmount < HIGH_WATER_MARK) {
-      const end = Math.min(offset + CHUNK_SIZE, total);
-      channel.send(buffer.slice(offset, end));
-      offset = end;
+      // ── Inner pump: fill the buffer greedily ──────────────────────────────
+      while (blockOffset < blockLength && channel.bufferedAmount < HIGH_WATER_MARK) {
+        const chunkEnd = Math.min(blockOffset + CHUNK_SIZE, blockLength);
+        channel.send(blockBuffer.slice(blockOffset, chunkEnd));
+        blockOffset = chunkEnd;
 
-      if (onProgress) {
-        onProgress(Math.min(99, (offset / total) * 100));
+        if (onProgress) {
+          const overallProgress = fileOffset + blockOffset;
+          onProgress(Math.min(99, (overallProgress / total) * 100));
+        }
       }
     }
+    fileOffset = blockEnd;
   }
 
   // ── EOF ──────────────────────────────────────────────────────────────────
@@ -84,6 +66,6 @@ export async function sendFileChunks(file, channel, onProgress, fileId, checksum
     type: 'EOF',
     fileId: actualFileId,
     fileName: file.name,
-    checksum: checksum ?? null,
+    checksum: null,
   }));
 }

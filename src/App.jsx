@@ -5,7 +5,7 @@ import { Shield, Key, Zap, Link2, HardDrive, Lock, Tv, Wifi, Globe, CheckCircle 
 import DragDropZone from './components/DragDropZone';
 import ChatPanel from './components/ChatPanel';
 import ClipboardPanel from './components/ClipboardPanel';
-import { sendFileChunks, computeFileChecksum } from './lib/dataChannel';
+import { sendFileChunks } from './lib/dataChannel';
 import { initializeOPFS, writeChunkToDisk, finalizeFile, autoDownloadFile, verifyChecksum, initializeIndexedDB, saveMetadata } from './lib/storage';
 import { startHeartbeat, handleHeartbeatMessage, stopHeartbeat, wipeLocalCache } from './lib/ephemerality';
 import { updateBackgroundPiPState, togglePictureInPicture, requestWakeLock, releaseWakeLock, setupBackgroundKeepAlive, initMobileBackgroundSound } from './lib/backgroundMode';
@@ -717,36 +717,23 @@ export default function App() {
     setIsTransferring(true);
     setTransferProgress(0);
 
-    // ── Read the file into memory ONCE ────────────────────────────────────
-    // The same ArrayBuffer is used for SHA-256 hashing AND for sending,
-    // so the OS only reads the file from disk a single time.
-    file.arrayBuffer()
-      .then(async (buffer) => {
-        // Checksum computed from the already-loaded buffer — no second read
-        let checksum = null;
-        try {
-          checksum = await computeFileChecksum(buffer);
-        } catch (err) {
-          console.warn('[Transfer] Checksum computation failed, sending without it:', err);
-        }
-
-        openChannels.forEach(({ channel }) => {
-          channel.send(metadataPayload);
-          // sendFileChunks receives a Blob wrapping the pre-loaded buffer so
-          // its internal file.arrayBuffer() call is instant (cached memory).
-          sendFileChunks(
-            new Blob([buffer], { type: file.type }),
-            channel,
-            (progress) => setTransferProgress(progress),
-            uuid,
-            checksum,
-          );
+    try {
+      openChannels.forEach(({ channel }) => {
+        channel.send(metadataPayload);
+        sendFileChunks(
+          file,
+          channel,
+          (progress) => setTransferProgress(progress),
+          uuid
+        ).catch(err => {
+          console.error('[Transfer] Failed to send file chunks:', err);
+          setIsTransferring(false);
         });
-      })
-      .catch(err => {
-        console.error('[Transfer] Failed to read file buffer:', err);
-        setIsTransferring(false);
       });
+    } catch (err) {
+      console.error('[Transfer] Failed to initiate transfer:', err);
+      setIsTransferring(false);
+    }
 
 
     // Safety fallback timeout (45s) in case a recipient hangs

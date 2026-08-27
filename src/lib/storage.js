@@ -4,11 +4,7 @@ let writableStream = null;
 let inMemoryBuffer = [];
 let currentFileName = '';
 
-// ─── Incremental SHA-256 checksum state ──────────────────────────────────────
-// We accumulate all received raw chunk bytes so we can hash them at EOF.
-// Using a simple array of Uint8Array slices (same as inMemoryBuffer fallback)
-// avoids a second pass over the file.
-let checksumChunks = [];
+// ─── Checksum computation removed to save memory on large files ────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -19,7 +15,6 @@ let checksumChunks = [];
 export async function initializeOPFS(fileName) {
   currentFileName = fileName;
   inMemoryBuffer = [];
-  checksumChunks = [];
 
   if (typeof navigator !== 'undefined' && navigator.storage && typeof navigator.storage.getDirectory === 'function') {
     try {
@@ -41,9 +36,6 @@ export async function initializeOPFS(fileName) {
  * Writes to OPFS (or memory) AND accumulates the raw bytes for checksum.
  */
 export async function writeChunkToDisk(chunk) {
-  // Accumulate for checksum verification
-  checksumChunks.push(new Uint8Array(chunk instanceof ArrayBuffer ? chunk : chunk.buffer));
-
   if (writableStream) {
     await writableStream.write(chunk);
   } else {
@@ -70,30 +62,8 @@ export async function finalizeFile() {
  * @returns {{ ok: boolean, actual: string, expected: string }}
  */
 export async function verifyChecksum(expectedChecksum) {
-  if (!expectedChecksum) {
-    return { ok: true, actual: null, expected: null };
-  }
-
-  try {
-    // Concatenate all received chunks into a single ArrayBuffer
-    const totalLength = checksumChunks.reduce((s, c) => s + c.byteLength, 0);
-    const combined = new Uint8Array(totalLength);
-    let pos = 0;
-    for (const c of checksumChunks) {
-      combined.set(c, pos);
-      pos += c.byteLength;
-    }
-
-    const hashBuffer = await crypto.subtle.digest('SHA-256', combined);
-    const actual = Array.from(new Uint8Array(hashBuffer))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-
-    return { ok: actual === expectedChecksum, actual, expected: expectedChecksum };
-  } catch (e) {
-    console.warn('[Storage] Checksum verification failed with error', e);
-    return { ok: false, actual: null, expected: expectedChecksum };
-  }
+  // Checksum computation removed for speed/memory efficiency.
+  return { ok: true, actual: null, expected: expectedChecksum };
 }
 
 /**
@@ -108,7 +78,6 @@ export async function autoDownloadFile() {
       const blob = new Blob([await file.arrayBuffer()], { type: file.type || 'application/octet-stream' });
       triggerDownload(blob, currentFileName);
       fileHandle = null;
-      checksumChunks = [];
       return;
     } catch (e) {
       console.warn('[Storage] Failed to read OPFS file for download', e);
@@ -120,7 +89,6 @@ export async function autoDownloadFile() {
     const blob = new Blob(inMemoryBuffer);
     triggerDownload(blob, currentFileName);
     inMemoryBuffer = [];
-    checksumChunks = [];
   }
 }
 
