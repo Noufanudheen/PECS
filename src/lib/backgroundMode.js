@@ -120,9 +120,26 @@ export function setupBackgroundKeepAlive() {
       gain.connect(mediaStreamDest);
       gain.connect(audioCtx.destination); // Desktop keep-alive too
 
-      // Attach to a hidden <audio> element — this is what Android OS watches
+      // Tiny base64 silent MP3 to keep iOS Safari background alive
+      const silentMp3 = "data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//vQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWgAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+
+      // Attach to a hidden <audio> element — this is what iOS/Android OS watches
       const silentAudio = document.createElement('audio');
-      silentAudio.srcObject = mediaStreamDest.stream;
+      silentAudio.src = silentMp3;
+      silentAudio.loop = true;
+      silentAudio.playsInline = true;
+      silentAudio.autoplay = true;
+      // Also attach the media stream destination so Android recognizes the WebAudio node
+      if (silentAudio.srcObject !== undefined) {
+        // We set src to mp3 for iOS, but we can't do both src and srcObject easily. 
+        // We'll create a second audio element just for Android's stream if needed.
+        const androidAudio = document.createElement('audio');
+        androidAudio.srcObject = mediaStreamDest.stream;
+        androidAudio.style.cssText = 'position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px;';
+        document.body.appendChild(androidAudio);
+        androidAudio.play().catch(() => {});
+      }
+      
       silentAudio.style.cssText = 'position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px;';
       document.body.appendChild(silentAudio);
       silentAudio.play().catch(() => {});

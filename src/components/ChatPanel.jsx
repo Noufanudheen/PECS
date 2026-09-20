@@ -5,11 +5,13 @@ import { motion, AnimatePresence } from 'motion/react';
 export default function ChatPanel({ messages, onSend, disabled }) {
   const [input, setInput] = useState('');
   const [copiedId, setCopiedId] = useState(null);
-  const bottomRef = useRef(null);
+  const scrollRef = useRef(null);
   const inputRef = useRef(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
   }, [messages]);
 
   const handleSubmit = (e) => {
@@ -93,7 +95,7 @@ export default function ChatPanel({ messages, onSend, disabled }) {
       </p>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 min-h-0 chat-scroll">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-2.5 pr-1 min-h-0 chat-scroll">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center py-8">
             <motion.div
@@ -185,7 +187,6 @@ export default function ChatPanel({ messages, onSend, disabled }) {
             })}
           </AnimatePresence>
         )}
-        <div ref={bottomRef} />
       </div>
 
       {/* Input */}
