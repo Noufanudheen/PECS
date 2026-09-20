@@ -902,10 +902,10 @@ export default function App() {
           initial={{ opacity: 0, y: -12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-          className="pecs-panel px-5 py-3.5 mb-6 flex items-start sm:items-center justify-between z-40 relative"
+          className="pecs-panel px-4 py-3.5 sm:px-5 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between z-40 relative gap-3 sm:gap-0"
         >
           {/* Logo */}
-          <div className="flex items-center space-x-2.5 w-full sm:w-auto justify-center sm:justify-start">
+          <div className="flex items-center space-x-2.5 shrink-0 w-full sm:w-auto justify-start">
             <div className="w-8 h-8 rounded-lg flex items-center justify-center"
               style={{ background: 'var(--pecs-accent-dim)', border: '1px solid rgba(45,212,191,0.2)' }}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -914,7 +914,7 @@ export default function App() {
               </svg>
             </div>
             <div className="flex items-center space-x-2">
-              <span className="text-base font-bold text-white tracking-tight">PECS</span>
+              <span className="text-xl sm:text-lg font-bold text-white tracking-tight">PECS</span>
               <span className="text-xs font-medium tracking-wider uppercase hidden sm:inline"
                 style={{ color: 'var(--pecs-text-muted)' }}>
                 PRIVATE EXCHANGE
@@ -923,7 +923,7 @@ export default function App() {
           </div>
 
           {/* Right side controls */}
-          <div className="flex flex-col items-end space-y-2 sm:flex-row sm:items-center sm:space-y-0 sm:space-x-2.5 pt-1 sm:pt-0">
+          <div className="flex flex-col items-end space-y-2 sm:flex-row sm:items-center sm:space-y-0 sm:space-x-2.5 w-full sm:w-auto">
             {/* Network Mode Badge */}
             <button
               onClick={handleToggleMultiNetwork}
