@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { UploadCloud } from 'lucide-react';
+import { motion } from 'motion/react';
 
 export default function DragDropZone({ onFileSelect, disabled = false }) {
   const [isDragging, setIsDragging] = useState(false);
@@ -40,12 +41,22 @@ export default function DragDropZone({ onFileSelect, disabled = false }) {
   };
 
   return (
-    <div 
-      className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer flex flex-col items-center justify-center ${
-        isDragging 
-          ? 'border-indigo-500 bg-indigo-500/10' 
-          : 'border-zinc-700 bg-zinc-900/50 hover:border-zinc-500 hover:bg-zinc-800/50'
-      } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+    <motion.div
+      whileHover={!disabled ? { scale: 1.01 } : {}}
+      whileTap={!disabled ? { scale: 0.99 } : {}}
+      className={`
+        border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer
+        flex flex-col items-center justify-center transition-all duration-300
+        ${isDragging
+          ? 'border-[var(--pecs-accent)] bg-[var(--pecs-accent-glow)]'
+          : 'border-[var(--pecs-border)] hover:border-[var(--pecs-border-hover)]'
+        }
+        ${disabled ? 'opacity-40 cursor-not-allowed' : ''}
+      `}
+      style={{
+        background: isDragging ? 'var(--pecs-accent-glow)' : 'var(--pecs-bg)',
+        minHeight: 180,
+      }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -57,9 +68,19 @@ export default function DragDropZone({ onFileSelect, disabled = false }) {
         onChange={handleFileInput} 
         className="hidden" 
       />
-      <UploadCloud className={`w-10 h-10 mb-4 ${isDragging ? 'text-indigo-400' : 'text-zinc-500'}`} />
-      <h3 className="text-white font-medium mb-1">Drag & Drop file here</h3>
-      <p className="text-sm text-zinc-500">or click to browse from your device</p>
-    </div>
+      <motion.div
+        animate={isDragging ? { y: -4, scale: 1.1 } : { y: 0, scale: 1 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+      >
+        <UploadCloud
+          className="w-10 h-10 mb-3"
+          style={{ color: isDragging ? 'var(--pecs-accent)' : 'var(--pecs-text-muted)' }}
+        />
+      </motion.div>
+      <h3 className="text-white font-medium text-sm mb-1">Drop files here</h3>
+      <p className="text-xs" style={{ color: 'var(--pecs-text-muted)' }}>
+        or browse from this device
+      </p>
+    </motion.div>
   );
 }

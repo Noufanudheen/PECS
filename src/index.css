@@ -1,9 +1,42 @@
 @import "tailwindcss";
 
-/* Chat panel custom scrollbar */
+/* ─── PECS Design Tokens ─── */
+:root {
+  --pecs-bg: #0b1120;
+  --pecs-surface: #111827;
+  --pecs-surface-hover: #1a2332;
+  --pecs-card: #0f1729;
+  --pecs-border: #1e293b;
+  --pecs-border-hover: #334155;
+  --pecs-accent: #2dd4bf;
+  --pecs-accent-dim: rgba(45, 212, 191, 0.15);
+  --pecs-accent-glow: rgba(45, 212, 191, 0.08);
+  --pecs-text: #e2e8f0;
+  --pecs-text-dim: #94a3b8;
+  --pecs-text-muted: #64748b;
+  --pecs-danger: #f43f5e;
+  --pecs-success: #22c55e;
+  --pecs-warning: #f59e0b;
+}
+
+/* ─── Global Reset ─── */
+html, body {
+  background: var(--pecs-bg);
+  color: var(--pecs-text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(45, 212, 191, 0.25);
+  color: #fff;
+}
+
+/* ─── Scrollbar ─── */
 .chat-scroll {
   scrollbar-width: thin;
-  scrollbar-color: #3f3f46 transparent;
+  scrollbar-color: #1e293b transparent;
 }
 .chat-scroll::-webkit-scrollbar {
   width: 4px;
@@ -12,6 +45,182 @@
   background: transparent;
 }
 .chat-scroll::-webkit-scrollbar-thumb {
-  background-color: #3f3f46;
+  background-color: #1e293b;
   border-radius: 9999px;
+}
+.chat-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: #334155;
+}
+
+/* ─── Keyframe Animations ─── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.3); }
+  50% { box-shadow: 0 0 20px 4px rgba(45, 212, 191, 0.15); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes scanLine {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out both;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 2.5s ease-in-out infinite;
+}
+
+/* ─── Panel Styles ─── */
+.pecs-panel {
+  background: var(--pecs-card);
+  border: 1px solid var(--pecs-border);
+  border-radius: 16px;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.pecs-panel:hover {
+  border-color: var(--pecs-border-hover);
+}
+
+.pecs-panel-glow:hover {
+  box-shadow: 0 0 30px -5px rgba(45, 212, 191, 0.06);
+  border-color: rgba(45, 212, 191, 0.2);
+}
+
+/* ─── Button Styles ─── */
+.pecs-btn-primary {
+  background: var(--pecs-accent);
+  color: #0b1120;
+  font-weight: 600;
+  border-radius: 12px;
+  padding: 10px 20px;
+  transition: all 0.2s ease;
+  border: none;
+  cursor: pointer;
+}
+
+.pecs-btn-primary:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(45, 212, 191, 0.25);
+}
+
+.pecs-btn-primary:active {
+  transform: translateY(0);
+}
+
+.pecs-btn-secondary {
+  background: var(--pecs-surface);
+  color: var(--pecs-text);
+  font-weight: 500;
+  border-radius: 12px;
+  padding: 10px 20px;
+  border: 1px solid var(--pecs-border);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.pecs-btn-secondary:hover {
+  background: var(--pecs-surface-hover);
+  border-color: var(--pecs-border-hover);
+}
+
+/* ─── Input Styles ─── */
+.pecs-input {
+  background: var(--pecs-bg);
+  border: 1px solid var(--pecs-border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  color: var(--pecs-text);
+  font-size: 0.875rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  outline: none;
+}
+
+.pecs-input:focus {
+  border-color: var(--pecs-accent);
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.1);
+}
+
+.pecs-input::placeholder {
+  color: var(--pecs-text-muted);
+}
+
+/* ─── QR Scanner Overrides ─── */
+#qr-reader {
+  border: none !important;
+  border-radius: 16px !important;
+  overflow: hidden;
+}
+
+#qr-reader video {
+  border-radius: 16px !important;
+}
+
+/* ─── Stagger Animation Delays ─── */
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.1s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.2s; }
+.stagger-5 { animation-delay: 0.25s; }
+
+/* ─── Live Channel Dot ─── */
+@keyframes livePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+.live-dot {
+  animation: livePulse 2s ease-in-out infinite;
+}
+
+/* ─── Responsive ─── */
+@media (max-width: 1024px) {
+  .pecs-connected-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .pecs-pre-grid {
+    grid-template-columns: 1fr !important;
+  }
 }
