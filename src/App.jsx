@@ -902,7 +902,7 @@ export default function App() {
           initial={{ opacity: 0, y: -12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-          className="pecs-panel px-5 py-3.5 mb-6 flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-0 z-40 relative"
+          className="pecs-panel px-5 py-3.5 mb-6 flex items-start sm:items-center justify-between z-40 relative"
         >
           {/* Logo */}
           <div className="flex items-center space-x-2.5 w-full sm:w-auto justify-center sm:justify-start">
@@ -923,7 +923,7 @@ export default function App() {
           </div>
 
           {/* Right side controls */}
-          <div className="flex items-center justify-center sm:justify-end space-x-2.5 w-full sm:w-auto">
+          <div className="flex flex-col items-end space-y-2 sm:flex-row sm:items-center sm:space-y-0 sm:space-x-2.5 pt-1 sm:pt-0">
             {/* Network Mode Badge */}
             <button
               onClick={handleToggleMultiNetwork}
@@ -949,12 +949,12 @@ export default function App() {
             </button>
 
             {/* Connection status / Disconnect */}
-            {isConnected && (
+            {isConnected ? (
               <AnimatePresence>
                 <motion.div
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="flex items-center space-x-2 relative"
+                  className="flex flex-col items-end space-y-2 sm:flex-row sm:items-center sm:space-y-0 sm:space-x-2 relative"
                 >
                   <motion.button 
                     layoutId="connected-devices-modal"
@@ -966,39 +966,55 @@ export default function App() {
                     <span>Connected ({connectedPeers.length})</span>
                   </motion.button>
 
-                  <div className="relative">
-                    <motion.button
-                      layoutId="qr-modal"
-                      onClick={() => setQrModalMode('show')}
-                      className="p-1.5 rounded-lg transition-colors shadow-sm hover:bg-white/10"
-                      style={{ 
-                        background: 'var(--pecs-surface)',
-                        color: 'var(--pecs-text-muted)',
-                        border: '1px solid var(--pecs-border)'
+                  <div className="flex items-center space-x-2">
+                    <div className="relative">
+                      <motion.button
+                        layoutId="qr-modal"
+                        onClick={() => setQrModalMode('show')}
+                        className="p-1.5 rounded-lg transition-colors shadow-sm hover:bg-white/10"
+                        style={{ 
+                          background: 'var(--pecs-surface)',
+                          color: 'var(--pecs-text-muted)',
+                          border: '1px solid var(--pecs-border)'
+                        }}
+                        title="Show Room Code & QR"
+                      >
+                        <QrCode className="w-4 h-4" />
+                      </motion.button>
+                    </div>
+
+                    {/* Background Mode PiP */}
+                    <button
+                      onClick={handleTogglePiP}
+                      title="Background Mode"
+                      className="px-3 py-1.5 flex items-center space-x-1.5 rounded-lg text-xs font-semibold transition-all"
+                      style={{
+                        background: pipActive ? 'var(--pecs-accent-dim)' : 'transparent',
+                        color: pipActive ? 'var(--pecs-accent)' : 'var(--pecs-text-muted)',
+                        border: pipActive ? '1px solid rgba(45,212,191,0.2)' : '1px solid transparent',
                       }}
-                      title="Show Room Code & QR"
                     >
-                      <QrCode className="w-4 h-4" />
-                    </motion.button>
+                      <Tv className="w-4 h-4" />
+                      <span className="hidden sm:inline">PiP Mode</span>
+                    </button>
                   </div>
                 </motion.div>
               </AnimatePresence>
+            ) : (
+              <button
+                onClick={handleTogglePiP}
+                title="Background Mode"
+                className="px-3 py-1.5 flex items-center space-x-1.5 rounded-lg text-xs font-semibold transition-all"
+                style={{
+                  background: pipActive ? 'var(--pecs-accent-dim)' : 'transparent',
+                  color: pipActive ? 'var(--pecs-accent)' : 'var(--pecs-text-muted)',
+                  border: pipActive ? '1px solid rgba(45,212,191,0.2)' : '1px solid transparent',
+                }}
+              >
+                <Tv className="w-4 h-4" />
+                <span className="hidden sm:inline">PiP Mode</span>
+              </button>
             )}
-
-            {/* Background Mode PiP */}
-            <button
-              onClick={handleTogglePiP}
-              title="Background Mode"
-              className="px-3 py-1.5 flex items-center space-x-1.5 rounded-lg text-xs font-semibold transition-all"
-              style={{
-                background: pipActive ? 'var(--pecs-accent-dim)' : 'transparent',
-                color: pipActive ? 'var(--pecs-accent)' : 'var(--pecs-text-muted)',
-                border: pipActive ? '1px solid rgba(45,212,191,0.2)' : '1px solid transparent',
-              }}
-            >
-              <Tv className="w-4 h-4" />
-              <span>PiP Mode</span>
-            </button>
           </div>
         </motion.header>
 
