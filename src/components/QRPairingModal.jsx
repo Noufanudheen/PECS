@@ -4,8 +4,8 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { ArrowLeft, QrCode, Camera, Keyboard, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-export default function QRPairingModal({ roomCode, isConnected, onJoin, onClose }) {
-  const [mode, setMode] = useState('show'); // 'show' | 'scan'
+export default function QRPairingModal({ roomCode, isConnected, initialMode = 'show', onJoin, onClose }) {
+  const [mode, setMode] = useState(initialMode); // 'show' | 'scan'
   const [scanStatus, setScanStatus] = useState('idle');
   const [scannedCode, setScannedCode] = useState('');
   const [isDesktop, setIsDesktop] = useState(false);
@@ -18,6 +18,10 @@ export default function QRPairingModal({ roomCode, isConnected, onJoin, onClose 
     const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     setIsDesktop(!isMobile);
     if (!isMobile) setShowInput(true);
+
+    if (initialMode === 'scan' && isMobile) {
+      startScanner();
+    }
     
     return () => {
       if (scannerRef.current) {
@@ -29,7 +33,7 @@ export default function QRPairingModal({ roomCode, isConnected, onJoin, onClose 
 
   const startScanner = async () => {
     setScanStatus('scanning');
-    await new Promise(r => setTimeout(r, 100));
+    await new Promise(r => setTimeout(r, 400));
     try {
       const scanner = new Html5Qrcode('qr-reader');
       scannerRef.current = scanner;

@@ -1,11 +1,16 @@
-import React, { useState, useCallback } from 'react';
-import { Copy, Check, QrCode, LogIn, RefreshCw, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Copy, Check, QrCode, LogIn, RefreshCw, ChevronDown, ChevronUp, Loader2, Camera, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-export default function PairDeviceCard({ roomCode, onShowQR, onJoin, onRandomize, isWaitingForApproval }) {
+export default function PairDeviceCard({ roomCode, initialManualCode = '', onShowQR, onScanQR, onJoin, onRandomize, isWaitingForApproval }) {
   const [copied, setCopied] = useState(false);
-  const [showJoin, setShowJoin] = useState(false);
-  const [manualCode, setManualCode] = useState('');
+  const [showJoin, setShowJoin] = useState(!!initialManualCode);
+  const [manualCode, setManualCode] = useState(initialManualCode);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    setIsMobile(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+  }, []);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -66,14 +71,15 @@ export default function PairDeviceCard({ roomCode, onShowQR, onJoin, onRandomize
         </div>
 
         {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <button
             onClick={handleCopy}
-            className="flex-1 flex items-center justify-center space-x-2 py-3 px-4 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
+            className="flex items-center justify-center space-x-2 py-3 px-4 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
             style={{
               background: 'var(--pecs-surface)',
               border: '1px solid var(--pecs-border)',
               color: 'var(--pecs-text)',
+              gridColumn: isMobile ? 'span 2' : 'span 1'
             }}
           >
             {copied ? (
@@ -89,17 +95,35 @@ export default function PairDeviceCard({ roomCode, onShowQR, onJoin, onRandomize
             )}
           </button>
 
-          <button
-            onClick={onShowQR}
-            className="flex-1 flex items-center justify-center space-x-2 py-3 px-4 rounded-xl text-sm font-bold transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5"
-            style={{
-              background: 'var(--pecs-accent)',
-              color: 'var(--pecs-bg)',
-            }}
-          >
-            <QrCode className="w-4 h-4" />
-            <span>Show QR</span>
-          </button>
+          {isMobile ? (
+             <>
+                <button
+                  onClick={onShowQR}
+                  className="flex items-center justify-center space-x-2 py-3 px-4 rounded-xl text-sm font-bold transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5"
+                  style={{ background: 'var(--pecs-accent)', color: 'var(--pecs-bg)' }}
+                >
+                  <QrCode className="w-4 h-4" />
+                  <span>Show QR</span>
+                </button>
+                <button
+                  onClick={onScanQR}
+                  className="flex items-center justify-center space-x-2 py-3 px-4 rounded-xl text-sm font-bold transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5"
+                  style={{ background: 'var(--pecs-accent)', color: 'var(--pecs-bg)' }}
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>Scan QR</span>
+                </button>
+             </>
+          ) : (
+             <button
+               onClick={onShowQR}
+               className="flex items-center justify-center space-x-2 py-3 px-4 rounded-xl text-sm font-bold transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5"
+               style={{ background: 'var(--pecs-accent)', color: 'var(--pecs-bg)' }}
+             >
+               <QrCode className="w-4 h-4" />
+               <span>Show QR</span>
+             </button>
+          )}
         </div>
       </div>
 
@@ -130,15 +154,28 @@ export default function PairDeviceCard({ roomCode, onShowQR, onJoin, onRandomize
               className="overflow-hidden"
             >
               <form onSubmit={handleManualJoin} className="px-6 pb-6 pt-2 flex gap-3">
-                <input
-                  type="text"
-                  value={manualCode}
-                  onChange={(e) => setManualCode(e.target.value.toUpperCase())}
-                  placeholder="Enter code..."
-                  className="pecs-input flex-1 font-mono text-sm uppercase tracking-wider"
-                  maxLength={9}
-                  autoFocus
-                />
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    value={manualCode}
+                    onChange={(e) => setManualCode(e.target.value.toUpperCase())}
+                    placeholder="Enter code..."
+                    className="pecs-input w-full font-mono text-sm uppercase tracking-wider pr-10"
+                    maxLength={9}
+                    autoFocus
+                  />
+                  {manualCode.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setManualCode('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-md transition-colors hover:bg-white/10"
+                      style={{ color: 'var(--pecs-text-muted)' }}
+                      title="Clear code"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
                 <button
                   type="submit"
                   disabled={!manualCode.trim() || isWaitingForApproval}

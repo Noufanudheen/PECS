@@ -27,11 +27,11 @@ function getDeviceName() {
   else if (ua.includes("Chrome/")) browser = "Chrome";
   else if (ua.includes("Safari/") && !ua.includes("Chrome/")) browser = "Safari";
 
-  if (ua.includes("Win")) os = "Windows";
+  if (ua.includes("Windows") || ua.includes("Win")) os = "Windows";
+  else if (ua.includes("Android")) os = "Android";
+  else if (ua.includes("iPhone") || ua.includes("iPad") || ua.includes("iPod") || ua.includes("like Mac")) os = "iOS";
   else if (ua.includes("Mac")) os = "Mac";
   else if (ua.includes("Linux")) os = "Linux";
-  else if (ua.includes("Android")) os = "Android";
-  else if (ua.includes("like Mac OS X")) os = "iOS";
 
   return `${browser} on ${os}`;
 }
@@ -47,10 +47,10 @@ function generateRoomCode() {
 }
 
 function getStoredRoomCode() {
-  const stored = sessionStorage.getItem('pecs_room_code');
+  const stored = localStorage.getItem('pecs_room_code');
   if (stored && /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(stored)) return stored;
   const newCode = generateRoomCode();
-  sessionStorage.setItem('pecs_room_code', newCode);
+  localStorage.setItem('pecs_room_code', newCode);
   return newCode;
 }
 
@@ -64,9 +64,10 @@ export default function App() {
   const [currentRoom, setCurrentRoom] = useState(null); // The room we are actively listening/joined to
   const [status, setStatus] = useState('disconnected'); // 'disconnected', 'listening', 'connected'
   const [connectedPeers, setConnectedPeers] = useState([]); // [{id, deviceName, isLocal}]
+  const deviceNamesRef = useRef(new Map());
   
   // Modals & Overlays
-  const [showQRModal, setShowQRModal] = useState(false);
+  const [qrModalMode, setQrModalMode] = useState(null); // 'show' | 'scan' | null
   const [showDevicesModal, setShowDevicesModal] = useState(false);
   
   // Connection Requests
@@ -118,7 +119,9 @@ export default function App() {
   const [pipActive, setPipActive] = useState(false);
   const [showIosSyncOverlay, setShowIosSyncOverlay] = useState(false);
   const [allowMultiNetwork, setAllowMultiNetwork] = useState(() => {
-    return localStorage.getItem('pecs_allow_multi_network') === 'true';
+    const stored = localStorage.getItem('pecs_allow_multi_network');
+    // Default to true (Online Mode) if not explicitly set to false
+    return stored === null ? true : stored === 'true';
   });
 
   const allowMultiNetworkRef = useRef(allowMultiNetwork);
@@ -282,7 +285,8 @@ export default function App() {
             });
           } catch (e) { }
         }
-        activePeers.push({ id: peerId, deviceName: 'Connected Peer', isLocal });
+        const deviceName = deviceNamesRef.current.get(peerId) || 'Connected Peer';
+        activePeers.push({ id: peerId, deviceName, isLocal });
       }
     }
 
@@ -327,6 +331,7 @@ export default function App() {
       const dc = dataChannelsRef.current.get(peerId);
       if (dc) stopHeartbeat(dc);
       dataChannelsRef.current.delete(peerId);
+      deviceNamesRef.current.delete(peerId);
       
       pendingCandidatesRef.current.delete(peerId);
 
@@ -342,6 +347,7 @@ export default function App() {
       peersRef.current.clear();
       dataChannelsRef.current.forEach(dc => stopHeartbeat(dc));
       dataChannelsRef.current.clear();
+      deviceNamesRef.current.clear();
       pendingCandidatesRef.current.clear();
       
       setClipboardItems([]);
@@ -610,6 +616,7 @@ export default function App() {
         if (parsed.type === 'HEARTBEAT_PING' || parsed.type === 'HEARTBEAT_PONG') {
           handleHeartbeatMessage(channel, parsed);
         } else if (parsed.type === 'DEVICE_INFO') {
+           deviceNamesRef.current.set(peerId, parsed.deviceName);
            setConnectedPeers(prev => prev.map(p => p.id === peerId ? { ...p, deviceName: parsed.deviceName } : p));
         } else if (parsed.type === 'CHAT_MESSAGE') {
           setMessages(prev => [...prev, {
@@ -736,6 +743,7 @@ export default function App() {
   // Manual Join / QR Join (Guest)
   const handleJoinAnotherRoom = async (code) => {
     if (!code || !code.trim()) return;
+    localStorage.setItem('pecs_last_joined_code', code);
     setPendingRequests([]);
     setIsWaitingForApproval(true);
     joinSocketRoom(code); // Joins their room and waits for them to send an offer
@@ -755,7 +763,7 @@ export default function App() {
 
   const handleRandomizeCode = () => {
     const newCode = generateRoomCode();
-    sessionStorage.setItem('pecs_room_code', newCode);
+    localStorage.setItem('pecs_room_code', newCode);
     setRoomCode(newCode);
     setPendingRequests([]);
     joinSocketRoom(newCode);
@@ -919,7 +927,7 @@ export default function App() {
             {/* Network Mode Badge */}
             <button
               onClick={handleToggleMultiNetwork}
-              title={allowMultiNetwork ? "Multi-Network Sync ON: STUN enabled" : "Strict LAN Mode: Zero STUN, local only"}
+              title={allowMultiNetwork ? "Online Mode: STUN enabled" : "LAN Mode: Zero STUN, local only"}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-all"
               style={{
                 background: allowMultiNetwork ? 'rgba(245,158,11,0.1)' : 'var(--pecs-accent-dim)',
@@ -930,12 +938,12 @@ export default function App() {
               {allowMultiNetwork ? (
                 <>
                   <Globe className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Multi-Network</span>
+                  <span>Online Mode</span>
                 </>
               ) : (
                 <>
                   <Wifi className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">LOCAL-ONLY</span>
+                  <span>LAN Mode</span>
                 </>
               )}
             </button>
@@ -961,7 +969,7 @@ export default function App() {
                   <div className="relative">
                     <motion.button
                       layoutId="qr-modal"
-                      onClick={() => setShowQRModal(true)}
+                      onClick={() => setQrModalMode('show')}
                       className="p-1.5 rounded-lg transition-colors shadow-sm hover:bg-white/10"
                       style={{ 
                         background: 'var(--pecs-surface)',
@@ -981,7 +989,7 @@ export default function App() {
             <button
               onClick={handleTogglePiP}
               title="Background Mode"
-              className="p-2 rounded-lg transition-all"
+              className="px-3 py-1.5 flex items-center space-x-1.5 rounded-lg text-xs font-semibold transition-all"
               style={{
                 background: pipActive ? 'var(--pecs-accent-dim)' : 'transparent',
                 color: pipActive ? 'var(--pecs-accent)' : 'var(--pecs-text-muted)',
@@ -989,6 +997,7 @@ export default function App() {
               }}
             >
               <Tv className="w-4 h-4" />
+              <span>PiP Mode</span>
             </button>
           </div>
         </motion.header>
@@ -1033,8 +1042,10 @@ export default function App() {
                    transition={{ duration: 0.5, delay: 0.2 }}
                 >
                   <PairDeviceCard
-                    roomCode={roomCode}
-                    onShowQR={() => setShowQRModal(true)}
+                    roomCode={currentRoom || roomCode}
+                    initialManualCode={localStorage.getItem('pecs_last_joined_code') || ''}
+                    onShowQR={() => setQrModalMode('show')}
+                    onScanQR={() => setQrModalMode('scan')}
                     onJoin={handleJoinAnotherRoom}
                     onRandomize={handleRandomizeCode}
                     isWaitingForApproval={isWaitingForApproval}
@@ -1226,14 +1237,14 @@ export default function App() {
         </AnimatePresence>
       </div>
 
-      {/* ═══════════════════════ MODALS ═══════════════════════ */}
       <AnimatePresence>
-        {showQRModal && (
+        {qrModalMode && (
           <QRPairingModal
             roomCode={currentRoom || roomCode}
             isConnected={isConnected}
-            onJoin={(code) => { setShowQRModal(false); handleJoinAnotherRoom(code); }}
-            onClose={() => setShowQRModal(false)}
+            initialMode={qrModalMode}
+            onJoin={(code) => { setQrModalMode(null); handleJoinAnotherRoom(code); }}
+            onClose={() => setQrModalMode(null)}
           />
         )}
         
