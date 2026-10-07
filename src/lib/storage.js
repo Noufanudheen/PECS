@@ -4,6 +4,10 @@ let writableStream = null;
 let inMemoryBuffer = [];
 let currentFileName = '';
 
+let opfsWriteBuffer = [];
+let opfsWriteBufferLength = 0;
+const OPFS_FLUSH_THRESHOLD = 4 * 1024 * 1024; // 4MB
+
 // ─── Checksum computation removed to save memory on large files ────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -15,6 +19,8 @@ let currentFileName = '';
 export async function initializeOPFS(fileName) {
   currentFileName = fileName;
   inMemoryBuffer = [];
+  opfsWriteBuffer = [];
+  opfsWriteBufferLength = 0;
 
   if (typeof navigator !== 'undefined' && navigator.storage && typeof navigator.storage.getDirectory === 'function') {
     try {
@@ -36,10 +42,20 @@ export async function initializeOPFS(fileName) {
  * Writes to OPFS (or memory) AND accumulates the raw bytes for checksum.
  */
 export async function writeChunkToDisk(chunk) {
+  const buffer = chunk instanceof ArrayBuffer ? chunk : chunk.buffer;
+  
   if (writableStream) {
-    await writableStream.write(chunk);
+    opfsWriteBuffer.push(buffer);
+    opfsWriteBufferLength += buffer.byteLength;
+    
+    if (opfsWriteBufferLength >= OPFS_FLUSH_THRESHOLD) {
+      const blob = new Blob(opfsWriteBuffer);
+      opfsWriteBuffer = [];
+      opfsWriteBufferLength = 0;
+      await writableStream.write(blob);
+    }
   } else {
-    inMemoryBuffer.push(new Uint8Array(chunk instanceof ArrayBuffer ? chunk : chunk.buffer));
+    inMemoryBuffer.push(new Uint8Array(buffer));
   }
 }
 
@@ -49,6 +65,12 @@ export async function writeChunkToDisk(chunk) {
  */
 export async function finalizeFile() {
   if (writableStream) {
+    if (opfsWriteBufferLength > 0) {
+      const blob = new Blob(opfsWriteBuffer);
+      await writableStream.write(blob);
+      opfsWriteBuffer = [];
+      opfsWriteBufferLength = 0;
+    }
     await writableStream.close();
     writableStream = null;
   }
