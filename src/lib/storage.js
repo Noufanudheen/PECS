@@ -3,6 +3,7 @@ let fileHandle = null;
 let writableStream = null;
 let inMemoryBuffer = [];
 let currentFileName = '';
+let isNativeStream = false;
 
 let opfsWriteBuffer = [];
 let opfsWriteBufferLength = 0;
@@ -97,8 +98,7 @@ export async function autoDownloadFile() {
   if (fileHandle) {
     try {
       const file = await fileHandle.getFile();
-      const blob = new Blob([await file.arrayBuffer()], { type: file.type || 'application/octet-stream' });
-      triggerDownload(blob, currentFileName);
+      triggerDownload(file, currentFileName);
       fileHandle = null;
       return;
     } catch (e) {
@@ -124,7 +124,7 @@ function triggerDownload(blob, name) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  setTimeout(() => URL.revokeObjectURL(url), 600000); // 10 minutes to allow large file copying
 }
 
 // ─── IndexedDB helpers (transfer metadata) ───────────────────────────────────

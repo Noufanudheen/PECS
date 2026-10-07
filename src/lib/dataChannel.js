@@ -27,6 +27,7 @@ export async function sendFileChunks(file, channel, onProgress, fileId) {
   const actualFileId = fileId || file.name;
   const total = file.size;
   let fileOffset = 0;
+  let lastProgressUpdate = 0;
 
   // Set the threshold for the `onbufferedamountlow` event
   channel.bufferedAmountLowThreshold = LOW_WATER_MARK;
@@ -70,7 +71,7 @@ export async function sendFileChunks(file, channel, onProgress, fileId) {
         const chunkEnd = Math.min(blockOffset + CHUNK_SIZE, blockLength);
         
         try {
-          channel.send(blockBuffer.slice(blockOffset, chunkEnd));
+          channel.send(new Uint8Array(blockBuffer, blockOffset, chunkEnd - blockOffset));
           blockOffset = chunkEnd;
         } catch (err) {
           // If the underlying socket buffer is full, send() can throw.
@@ -80,8 +81,12 @@ export async function sendFileChunks(file, channel, onProgress, fileId) {
         }
 
         if (onProgress) {
-          const overallProgress = fileOffset + blockOffset;
-          onProgress(Math.min(99, (overallProgress / total) * 100));
+          const now = Date.now();
+          if (now - lastProgressUpdate > 100) {
+            const overallProgress = fileOffset + blockOffset;
+            onProgress(Math.min(99, (overallProgress / total) * 100), overallProgress, total);
+            lastProgressUpdate = now;
+          }
         }
       }
     }

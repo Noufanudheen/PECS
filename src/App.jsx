@@ -9,6 +9,7 @@ import PairDeviceCard from './components/PairDeviceCard';
 import QRPairingModal from './components/QRPairingModal';
 import ConnectionRequest from './components/ConnectionRequest';
 import ConnectedDevicesModal from './components/ConnectedDevicesModal';
+import LargeFilePrompt from './components/LargeFilePrompt';
 import { sendFileChunks } from './lib/dataChannel';
 import { initializeOPFS, writeChunkToDisk, finalizeFile, autoDownloadFile, verifyChecksum, initializeIndexedDB, saveMetadata } from './lib/storage';
 import { startHeartbeat, handleHeartbeatMessage, stopHeartbeat, wipeLocalCache } from './lib/ephemerality';
@@ -58,6 +59,14 @@ function isIOS() {
   return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 export default function App() {
   // Connection state
   const [roomCode, setRoomCode] = useState(getStoredRoomCode);
@@ -76,9 +85,11 @@ export default function App() {
 
   // File Transfer State
   const [transferProgress, setTransferProgress] = useState(0);
+  const [transferBytes, setTransferBytes] = useState({ current: 0, total: 0 });
   const [isTransferring, setIsTransferring] = useState(false);
   const [receivedFile, setReceivedFile] = useState(null);
   const [sentFileSuccess, setSentFileSuccess] = useState(null);
+  const [largeFilePrompt, setLargeFilePrompt] = useState(null);
 
   const roomCodeRef = useRef(roomCode);
   useEffect(() => { roomCodeRef.current = roomCode; }, [roomCode]);
@@ -658,11 +669,42 @@ export default function App() {
             console.warn('WebRTC Clipboard auto-copy skipped:', e);
           }
         } else if (parsed.type === 'FILE_METADATA') {
-          setIsTransferring(true);
-          setTransferProgress(0);
-          setReceivedFile(null);
-          await initializeOPFS(parsed.name);
-          if (dbRef.current) await saveMetadata(dbRef.current, { fileId: parsed.id, name: parsed.name, size: parsed.size });
+          if (parsed.size > 250 * 1024 * 1024) {
+            setLargeFilePrompt({
+              id: parsed.id,
+              name: parsed.name,
+              size: parsed.size,
+              peerId,
+              channel
+            });
+          } else {
+            channel.send(JSON.stringify({ type: 'FILE_ACCEPT', fileId: parsed.id }));
+            setIsTransferring(true);
+            setTransferProgress(0);
+            setTransferBytes({ current: 0, total: parsed.size });
+            activeTransferRef.current.totalBytes = parsed.size;
+            activeTransferRef.current.currentBytes = 0;
+            activeTransferRef.current.lastProgressUpdate = Date.now();
+            setReceivedFile(null);
+            await initializeOPFS(parsed.name);
+            if (dbRef.current) await saveMetadata(dbRef.current, { fileId: parsed.id, name: parsed.name, size: parsed.size });
+          }
+        } else if (parsed.type === 'FILE_ACCEPT') {
+          if (activeTransferRef.current.fileId === parsed.fileId && !activeTransferRef.current.acceptedPeerIds.has(peerId)) {
+            activeTransferRef.current.acceptedPeerIds.add(peerId);
+            const fileObj = activeTransferRef.current.fileObj;
+            if (fileObj) {
+              sendFileChunks(fileObj, channel, (progress, currentBytes, totalBytes) => {
+                setTransferProgress(progress);
+                setTransferBytes({ current: currentBytes, total: totalBytes });
+              }, parsed.fileId).catch(err => console.error(err));
+            }
+          }
+        } else if (parsed.type === 'FILE_REJECT') {
+          if (activeTransferRef.current.fileId === parsed.fileId) {
+            activeTransferRef.current.pendingPeerIds.delete(peerId);
+            checkTransferACKComplete();
+          }
         } else if (parsed.type === 'EOF') {
           await finalizeFile();
           const checksumResult = await verifyChecksum(parsed.checksum || null);
@@ -689,11 +731,42 @@ export default function App() {
         }
       } else if (event.data instanceof ArrayBuffer) {
         await writeChunkToDisk(event.data);
+        const currentBytes = activeTransferRef.current.currentBytes || 0;
+        const total = activeTransferRef.current.totalBytes || 1;
+        activeTransferRef.current.currentBytes = currentBytes + event.data.byteLength;
+        const progress = Math.min(99, (activeTransferRef.current.currentBytes / total) * 100);
+        
+        const now = Date.now();
+        if (now - (activeTransferRef.current.lastProgressUpdate || 0) > 100) {
+          setTransferProgress(progress);
+          setTransferBytes({ current: activeTransferRef.current.currentBytes, total });
+          activeTransferRef.current.lastProgressUpdate = now;
+        }
       }
     };
   }, [updateConnectionStatus, handleDisconnection, checkTransferACKComplete]);
 
   // Handle Accept Connection Request (Owner)
+  const handleAcceptLargeFile = async (prompt) => {
+    setLargeFilePrompt(null);
+    await initializeOPFS(prompt.name);
+    
+    prompt.channel.send(JSON.stringify({ type: 'FILE_ACCEPT', fileId: prompt.id }));
+    setIsTransferring(true);
+    setTransferProgress(0);
+    setTransferBytes({ current: 0, total: prompt.size });
+    activeTransferRef.current.totalBytes = prompt.size;
+    activeTransferRef.current.currentBytes = 0;
+    activeTransferRef.current.lastProgressUpdate = Date.now();
+    setReceivedFile(null);
+    if (dbRef.current) await saveMetadata(dbRef.current, { fileId: prompt.id, name: prompt.name, size: prompt.size });
+  };
+
+  const handleRejectLargeFile = (prompt) => {
+    setLargeFilePrompt(null);
+    prompt.channel.send(JSON.stringify({ type: 'FILE_REJECT', fileId: prompt.id }));
+  };
+
   const handleAcceptRequest = async (peerId) => {
     setPendingRequests(prev => prev.filter(req => req.peerId !== peerId));
     if (!socketRef.current || !cryptoKeyRef.current) return;
@@ -786,30 +859,20 @@ export default function App() {
     if (activeTransferRef.current.timeoutId) clearTimeout(activeTransferRef.current.timeoutId);
 
     const pendingPeerIds = new Set(openChannels.map(c => c.peerId));
-    activeTransferRef.current = { fileId: uuid, fileName: file.name, pendingPeerIds, timeoutId: null };
+    activeTransferRef.current = { fileId: uuid, fileName: file.name, pendingPeerIds, fileObj: file, acceptedPeerIds: new Set(), timeoutId: null };
 
     setSentFileSuccess(null);
     setReceivedFile(null);
     setIsTransferring(true);
     setTransferProgress(0);
+    setTransferBytes({ current: 0, total: file.size });
 
     try {
       openChannels.forEach(({ channel }) => {
         channel.send(metadataPayload);
-        sendFileChunks(file, channel, (progress) => setTransferProgress(progress), uuid)
-          .catch(err => { setIsTransferring(false); });
       });
     } catch (err) { setIsTransferring(false); }
 
-    activeTransferRef.current.timeoutId = setTimeout(() => {
-      if (activeTransferRef.current.fileId === uuid) {
-        const completedFileName = activeTransferRef.current.fileName;
-        activeTransferRef.current = { fileId: null, fileName: '', pendingPeerIds: new Set(), timeoutId: null };
-        setTransferProgress(100);
-        setIsTransferring(false);
-        if (completedFileName) setSentFileSuccess({ name: completedFileName });
-      }
-    }, 45000);
   };
 
   const handleSendChat = useCallback((text) => {
@@ -893,6 +956,11 @@ export default function App() {
             onDecline={handleDeclineRequest} 
           />
         ))}
+        <LargeFilePrompt 
+          prompt={largeFilePrompt} 
+          onAccept={handleAcceptLargeFile} 
+          onDecline={handleRejectLargeFile} 
+        />
       </AnimatePresence>
 
       <div className="max-w-[1400px] mx-auto p-4 md:p-6 lg:p-8 w-full flex-1 flex flex-col">
@@ -1058,7 +1126,7 @@ export default function App() {
                    transition={{ duration: 0.5, delay: 0.2 }}
                 >
                   <PairDeviceCard
-                    roomCode={currentRoom || roomCode}
+                    roomCode={roomCode}
                     initialManualCode={localStorage.getItem('pecs_last_joined_code') || ''}
                     onShowQR={() => setQrModalMode('show')}
                     onScanQR={() => setQrModalMode('scan')}
@@ -1169,7 +1237,7 @@ export default function App() {
                             <span>
                               {transferProgress >= 99 && activeTransferRef.current.fileId
                                 ? 'Awaiting peer acknowledgement…'
-                                : 'Transferring…'}
+                                : `Transferring… ${transferBytes.total > 0 ? `(${formatBytes(transferBytes.current)} / ${formatBytes(transferBytes.total)})` : ''}`}
                             </span>
                             <span>{Math.round(transferProgress)}%</span>
                           </div>
@@ -1256,7 +1324,7 @@ export default function App() {
       <AnimatePresence>
         {qrModalMode && (
           <QRPairingModal
-            roomCode={currentRoom || roomCode}
+            roomCode={roomCode}
             isConnected={isConnected}
             initialMode={qrModalMode}
             onJoin={(code) => { setQrModalMode(null); handleJoinAnotherRoom(code); }}
