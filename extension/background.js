@@ -102,7 +102,7 @@ async function processClipboardData(text) {
     lastCopiedText = text;
     
     // Broadcast to all active PECS tabs
-    const tabs = await chrome.tabs.query({ url: ['*://localhost/*', '*://127.0.0.1/*', '*://*.onrender.com/*'] });
+    const tabs = await chrome.tabs.query({ url: ['*://localhost/*', '*://127.0.0.1/*', '*://pecs.noufan.me/*', '*://pecs.onrender.com/*'] });
     console.log(`[PECS Extension] Found ${tabs.length} matching tabs to broadcast to.`);
     
     for (const tab of tabs) {

@@ -8,7 +8,9 @@
       "id": "pecs@noufanudheen.com",
       "strict_min_version": "109.0",
       "data_collection_permissions": {
-        "required": ["none"]
+        "required": [
+          "none"
+        ]
       }
     }
   },
@@ -21,11 +23,14 @@
   "host_permissions": [
     "*://localhost/*",
     "*://127.0.0.1/*",
-    "*://*.onrender.com/*"
+    "*://pecs.noufan.me/*",
+    "*://pecs.onrender.com/*"
   ],
   "background": {
     "service_worker": "background.js",
-    "scripts": ["background.js"],
+    "scripts": [
+      "background.js"
+    ],
     "type": "module"
   },
   "action": {
@@ -37,9 +42,12 @@
       "matches": [
         "*://localhost/*",
         "*://127.0.0.1/*",
-        "*://*.onrender.com/*"
+        "*://pecs.noufan.me/*",
+        "*://pecs.onrender.com/*"
       ],
-      "js": ["content.js"]
+      "js": [
+        "content.js"
+      ]
     }
   ]
 }

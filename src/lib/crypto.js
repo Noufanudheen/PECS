@@ -1,8 +1,9 @@
 const isSubtleSupported = typeof window !== 'undefined' && !!(window.crypto && window.crypto.subtle);
 
 export async function deriveKey(roomCode) {
-  const isHTTP = typeof window !== 'undefined' && window.location && window.location.protocol === 'http:';
-  const forceFallback = roomCode.startsWith('dev-') || roomCode.includes('fallback') || isHTTP;
+  // Only force fallback if it's genuinely not a secure context (localhost is secure despite being http)
+  const isNonSecure = typeof window !== 'undefined' && window.isSecureContext === false;
+  const forceFallback = roomCode.startsWith('dev-') || roomCode.includes('fallback') || isNonSecure;
 
   if (isSubtleSupported && !forceFallback) {
     const encoder = new TextEncoder();
